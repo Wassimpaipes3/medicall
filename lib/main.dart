@@ -32,6 +32,11 @@ import 'package:firstv/widgets/booking/ServiceSelectionPage.dart';
 import 'package:firstv/widgets/booking/AppointmentsPage.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
+import 'package:firstv/services/real_time_role_service.dart';
+import 'package:firstv/screens/admin/admin_dashboard_screen.dart';
+
+// Global navigator key for app-wide navigation
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +48,9 @@ void main() async {
   
   // Initialize services
   NotificationService().initializeMockData();
+  
+  // Initialize Real-Time Role Service with navigator key
+  await RealTimeRoleService.initialize(navKey: navigatorKey);
   
   // Enhanced system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(
@@ -71,6 +79,7 @@ class MyApp extends StatelessWidget {
       title: 'Enhanced Healthcare App',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      navigatorKey: navigatorKey, // Add global navigator key for role monitoring
 
       // Start with splash screen for proper app flow
       initialRoute: AppRoutes.splash,
@@ -115,6 +124,8 @@ class MyApp extends StatelessWidget {
         AppRoutes.enhancedMessages: (context) => const EnhancedMessagesScreen(),
         AppRoutes.enhancedEarnings: (context) => const EnhancedEarningsScreen(),
         AppRoutes.enhancedAppointmentManagement: (context) => const EnhancedAppointmentManagementScreen(),
+        // Admin Routes
+        '/admin-dashboard': (context) => const AdminDashboardScreen(),
       },
     );
   }

@@ -38,7 +38,7 @@ class RoleRedirectService {
         case 'professional':
           return '/provider-dashboard';
         case 'admin':
-          return '/admin'; // You can change this to any existing admin route
+          return '/admin-dashboard';
         default:
           debugPrint('Unknown role: $role, defaulting to patient');
           return '/home';
@@ -172,6 +172,21 @@ class RoleRedirectService {
     } catch (e) {
       debugPrint('Error handling login redirect: $e');
       return '/home';
+    }
+  }
+
+  /// Handle role transition when user's role changes (for real-time updates)
+  static Future<void> handleRoleTransition(String userId, String? newRole) async {
+    try {
+      debugPrint('🔄 Handling role transition for $userId to $newRole');
+      
+      // Clean up old role documents and create new ones
+      await _cleanupOldRoleDocuments(userId, newRole);
+      await ensureRoleDocument(userId, newRole ?? 'patient');
+      
+      debugPrint('✅ Role transition completed');
+    } catch (e) {
+      debugPrint('❌ Error in role transition: $e');
     }
   }
 }

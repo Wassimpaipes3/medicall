@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../firebase_options.dart';
 import 'role_redirect_service.dart';
+import 'real_time_role_service.dart';
 
 class AuthService {
   FirebaseAuth? _auth;
@@ -245,6 +246,10 @@ class AuthService {
       // Get redirect route based on role and clean up old documents
       final redirectRoute = await RoleRedirectService.handleLoginRedirect();
       
+      // Start real-time role monitoring
+      await RealTimeRoleService().startRoleMonitoring();
+      print('🎯 Real-time role monitoring started');
+      
       return {
         'success': true,
         'user': result.user,
@@ -262,6 +267,10 @@ class AuthService {
 
   Future<void> signOut() async {
     try {
+      // Stop real-time role monitoring before signing out
+      await RealTimeRoleService().stopRoleMonitoring();
+      print('🛑 Role monitoring stopped');
+      
       final auth = await _getAuth();
       await auth.signOut();
       print('✅ User signed out successfully');
