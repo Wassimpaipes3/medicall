@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../widgets/booking/ServiceSelectionPage.dart';
+import '../../widgets/patient/patient_navigation_bar.dart';
 import '../../core/theme.dart';
+import '../../routes/app_routes.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -185,6 +187,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  void _handleBottomNavTap(int index) {
+    // Handle navigation based on index
+    switch (index) {
+      case 0: // Home - already on home screen
+        break;
+      case 1: // Appointments
+        Navigator.pushNamed(context, AppRoutes.appointments);
+        break;
+      case 2: // Messages
+        Navigator.pushNamed(context, AppRoutes.chatPage);
+        break;
+      case 3: // Profile
+        Navigator.pushNamed(context, AppRoutes.profile);
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -213,8 +232,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       
                       // Health Updates List
                       _buildHealthUpdatesList(),
-                      
-                      const SizedBox(height: 100), // Bottom nav space
+
+                      const SizedBox(height: 16),
+                      // Move the booking CTA into the scrollable content so it doesn't overlap the bottom nav
+                      _buildBookNowButton(),
+                      const SizedBox(height: 100), // Space to keep it above the bottom nav
                     ],
                   ),
                 ),
@@ -223,9 +245,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
         ),
       ),
-      bottomNavigationBar: _buildBottomNavigationBar(),
-      floatingActionButton: _buildBookNowButton(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      bottomNavigationBar: PatientNavigationBar(
+        selectedIndex: _selectedBottomIndex,
+        onTap: (index) {
+          setState(() {
+            _selectedBottomIndex = index;
+          });
+          HapticFeedback.lightImpact();
+          _handleBottomNavTap(index);
+        },
+        hasNotification: true, // You can make this dynamic based on actual notification state
+      ),
     );
   }
 
@@ -785,135 +815,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 },
               );
             },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomNavigationBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: BottomNavigationBar(
-        currentIndex: _selectedBottomIndex,
-        onTap: (index) {
-          HapticFeedback.selectionClick();
-          setState(() {
-            _selectedBottomIndex = index;
-          });
-        },
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        selectedItemColor: AppTheme.primaryColor,
-        unselectedItemColor: AppTheme.textSecondaryColor,
-        selectedLabelStyle: const TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: 12,
-        ),
-        unselectedLabelStyle: const TextStyle(
-          fontWeight: FontWeight.w500,
-          fontSize: 12,
-        ),
-        items: [
-          BottomNavigationBarItem(
-            icon: Stack(
-              children: [
-                Icon(
-                  _selectedBottomIndex == 0 
-                      ? Icons.home_rounded 
-                      : Icons.home_outlined,
-                ),
-                if (_selectedBottomIndex == 0)
-                  Positioned(
-                    bottom: -8,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryColor,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Stack(
-              children: [
-                Icon(
-                  _selectedBottomIndex == 1 
-                      ? Icons.chat_rounded 
-                      : Icons.chat_outlined,
-                ),
-                // Unread message indicator
-                Positioned(
-                  right: 0,
-                  top: 0,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: AppTheme.medicalRed,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            label: 'Chat',
-          ),
-          BottomNavigationBarItem(
-            icon: Stack(
-              children: [
-                Icon(
-                  _selectedBottomIndex == 2 
-                      ? Icons.calendar_today_rounded 
-                      : Icons.calendar_today_outlined,
-                ),
-                // Pending appointment badge
-                Positioned(
-                  right: -2,
-                  top: -2,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: AppTheme.medicalOrange,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text(
-                      '2',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            label: 'Schedule',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(
-              _selectedBottomIndex == 3 
-                  ? Icons.person_rounded 
-                  : Icons.person_outline_rounded,
-            ),
-            label: 'Profile',
           ),
         ],
       ),

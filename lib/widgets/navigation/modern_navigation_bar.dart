@@ -52,6 +52,7 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
     required String label,
     required int index,
     int badgeCount = 0,
+    bool isCompact = false,
   }) {
     final isActive = widget.currentIndex == index;
     
@@ -61,6 +62,7 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
       onTapCancel: () => _animationController.reverse(),
       onTap: () {
         HapticFeedback.lightImpact();
+        print('🔥 NAV BAR DEBUG: Tapped $label (index $index)');
         widget.onTap(index);
       },
       child: AnimatedBuilder(
@@ -69,9 +71,16 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
           return Transform.scale(
             scale: isActive ? _scaleAnimation.value : 1.0,
             child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              constraints: BoxConstraints(
+                minWidth: isCompact ? 50 : 60,
+                maxWidth: isCompact ? 75 : 120,
+              ),
+              padding: EdgeInsets.symmetric(
+                vertical: isCompact ? 6 : 8, 
+                horizontal: isCompact ? 6 : 12,
+              ),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(isCompact ? 12 : 16),
                 color: isActive 
                   ? AppTheme.primaryColor.withOpacity(0.12)
                   : Colors.transparent,
@@ -84,7 +93,7 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
                     children: [
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.all(8),
+                        padding: EdgeInsets.all(isCompact ? 6 : 8),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: isActive 
@@ -99,19 +108,19 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
                             color: isActive 
                               ? AppTheme.primaryColor 
                               : AppTheme.textSecondaryColor,
-                            size: 24,
+                            size: isCompact ? 20 : 24,
                           ),
                         ),
                       ),
                       if (badgeCount > 0)
                         Positioned(
-                          right: 0,
-                          top: 0,
+                          right: -2,
+                          top: -2,
                           child: AnimatedScale(
                             scale: badgeCount > 0 ? 1.0 : 0.0,
                             duration: const Duration(milliseconds: 200),
                             child: Container(
-                              padding: const EdgeInsets.all(4),
+                              padding: EdgeInsets.all(isCompact ? 3 : 4),
                               decoration: BoxDecoration(
                                 color: AppTheme.errorColor,
                                 shape: BoxShape.circle,
@@ -120,15 +129,15 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
                                   width: 2,
                                 ),
                               ),
-                              constraints: const BoxConstraints(
-                                minWidth: 20,
-                                minHeight: 20,
+                              constraints: BoxConstraints(
+                                minWidth: isCompact ? 16 : 20,
+                                minHeight: isCompact ? 16 : 20,
                               ),
                               child: Text(
                                 badgeCount > 99 ? '99+' : badgeCount.toString(),
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: AppTheme.fontSizeXSmall,
+                                  fontSize: isCompact ? 8 : AppTheme.fontSizeXSmall,
                                   fontWeight: FontWeight.w600,
                                   fontFamily: AppTheme.fontFamily,
                                 ),
@@ -139,19 +148,41 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
                         ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 200),
-                    style: TextStyle(
-                      fontSize: AppTheme.fontSizeXSmall,
-                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                      color: isActive 
-                        ? AppTheme.primaryColor 
-                        : AppTheme.textSecondaryColor,
-                      fontFamily: AppTheme.fontFamily,
+                  if (!isCompact) ...[
+                    const SizedBox(height: 4),
+                    AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 200),
+                      style: TextStyle(
+                        fontSize: AppTheme.fontSizeXSmall,
+                        fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                        color: isActive 
+                          ? AppTheme.primaryColor 
+                          : AppTheme.textSecondaryColor,
+                        fontFamily: AppTheme.fontFamily,
+                      ),
+                      child: Text(
+                        label,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        textAlign: TextAlign.center,
+                      ),
                     ),
-                    child: Text(label),
-                  ),
+                  ] else if (isActive) ...[
+                    // Show abbreviated label only for active item in compact mode
+                    const SizedBox(height: 2),
+                    Text(
+                      label.length > 6 ? '${label.substring(0, 6)}.' : label,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primaryColor,
+                        fontFamily: AppTheme.fontFamily,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -163,7 +194,9 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
 
   @override
   Widget build(BuildContext context) {
+    print('DEBUG: ModernNavigationBar build called, currentIndex: ${widget.currentIndex}');
     return Container(
+      height: 80, // Ensure minimum height for visibility
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -175,37 +208,68 @@ class _ModernNavigationBarState extends State<ModernNavigationBar>
         ],
       ),
       child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
-                icon: Icons.home_outlined,
-                activeIcon: Icons.home_rounded,
-                label: 'Home',
-                index: 0,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Calculate if navigation items fit properly
+            final availableWidth = constraints.maxWidth - 32; // Account for padding
+            final minItemWidth = 60.0; // Minimum width per nav item
+            final totalMinWidth = minItemWidth * 4; // 4 navigation items
+            
+            // Determine if we need compact layout
+            final useCompactLayout = availableWidth < totalMinWidth + 60; // Extra buffer
+            
+            return Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: useCompactLayout ? 8 : 16, 
+                vertical: useCompactLayout ? 6 : 8,
               ),
-              _buildNavItem(
-                icon: Icons.chat_outlined,
-                activeIcon: Icons.chat_rounded,
-                label: 'Chat',
-                index: 1,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  // Index 0 - Home
+                  Flexible(
+                    child: _buildNavItem(
+                      icon: Icons.home_outlined,
+                      activeIcon: Icons.home_rounded,
+                      label: 'Home',
+                      index: 0,
+                      isCompact: useCompactLayout,
+                    ),
+                  ),
+                  // Index 1 - Chat
+                  Flexible(
+                    child: _buildNavItem(
+                      icon: Icons.chat_outlined,
+                      activeIcon: Icons.chat_rounded,
+                      label: 'Chat',
+                      index: 1,
+                      isCompact: useCompactLayout,
+                    ),
+                  ),
+                  // Index 2 - Schedule  
+                  Flexible(
+                    child: _buildNavItem(
+                      icon: Icons.calendar_month_outlined,
+                      activeIcon: Icons.calendar_month_rounded,
+                      label: 'Schedule',
+                      index: 2,
+                      isCompact: useCompactLayout,
+                    ),
+                  ),
+                  // Index 3 - Profile
+                  Flexible(
+                    child: _buildNavItem(
+                      icon: Icons.person_outlined,
+                      activeIcon: Icons.person_rounded,
+                      label: 'Profile',
+                      index: 3,
+                      isCompact: useCompactLayout,
+                    ),
+                  ),
+                ],
               ),
-              _buildNavItem(
-                icon: Icons.calendar_month_outlined,
-                activeIcon: Icons.calendar_month_rounded,
-                label: 'Schedule',
-                index: 2,
-              ),
-              _buildNavItem(
-                icon: Icons.person_outlined,
-                activeIcon: Icons.person_rounded,
-                label: 'Profile',
-                index: 3,
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

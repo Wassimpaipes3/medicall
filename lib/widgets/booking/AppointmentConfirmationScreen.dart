@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
 import '../../core/enhanced_theme.dart';
+import '../../services/notification_service.dart';
+import '../../services/provider/provider_service.dart';
+import '../../data/models/location_models.dart' as location_models;
 import 'ServiceSelectionPage.dart';
 
 class AppointmentConfirmationScreen extends StatefulWidget {
@@ -150,8 +153,33 @@ class _AppointmentConfirmationScreenState extends State<AppointmentConfirmationS
         'patientName': 'Current User', // You can get this from user profile
       };
 
-      // TODO: Implement proper appointment storage
-      print('Appointment saved: $appointment');
+      // Create appointment request for provider notification
+      final appointmentRequest = AppointmentRequest(
+        id: 'req_${DateTime.now().millisecondsSinceEpoch}',
+        patientId: 'patient_123', // Get from actual user session
+        patientName: 'Current User', // Get from actual user profile
+        patientPhone: '+1234567890', // Get from actual user profile
+        patientLocation: location_models.UserLocation(
+          latitude: 36.7538, // Default Algiers coordinates
+          longitude: 3.0588,
+          address: widget.selectedLocation['name'] ?? 'Unknown Location',
+          timestamp: DateTime.now(),
+        ),
+        serviceType: '${widget.selectedService.name} - ${widget.selectedSpecialty.name}',
+        requestedDateTime: appointmentDateTime,
+        createdAt: DateTime.now(),
+        status: AppointmentRequestStatus.pending,
+        specialInstructions: _notesController.text.isEmpty ? null : _notesController.text,
+        estimatedFee: _calculateEstimatedFee(widget.selectedService),
+        estimatedDuration: _calculateEstimatedDuration(widget.selectedService),
+        isEmergency: _isEmergencyService(widget.selectedSpecialty),
+      );
+
+      // Save appointment locally (implement proper storage)
+      await _saveAppointmentLocally(appointment);
+      
+      // Send notification to providers
+      await _notifyProvidersOfNewRequest(appointmentRequest);
 
       HapticFeedback.lightImpact();
       
@@ -159,11 +187,67 @@ class _AppointmentConfirmationScreenState extends State<AppointmentConfirmationS
       _showSuccessDialog();
       
     } catch (e) {
+      print('Error booking appointment: $e');
       _showErrorDialog();
     } finally {
       setState(() {
         _isLoading = false;
       });
+    }
+  }
+
+  Future<void> _saveAppointmentLocally(Map<String, dynamic> appointment) async {
+    // TODO: Implement proper local storage (SharedPreferences, SQLite, etc.)
+    print('Appointment saved locally: $appointment');
+  }
+
+  Future<void> _notifyProvidersOfNewRequest(AppointmentRequest request) async {
+    try {
+      // Use the enhanced notification service
+      final notificationService = NotificationService();
+      
+      // Send comprehensive notification to providers
+      await notificationService.notifyProviderOfNewBooking(
+        patientName: request.patientName,
+        serviceType: request.serviceType,
+        appointmentId: request.id,
+        appointmentTime: request.requestedDateTime,
+        location: request.patientLocationString,
+        estimatedFee: request.estimatedFee,
+        isEmergency: request.isEmergency,
+      );
+      
+      // Also show the traditional appointment request notification
+      notificationService.showNewAppointmentRequest(request);
+      
+      print('Comprehensive provider notification sent for appointment: ${request.id}');
+    } catch (e) {
+      print('Error sending provider notifications: $e');
+      // Don't throw error here as appointment was still created
+    }
+  }
+
+  bool _isEmergencyService(Specialty specialty) {
+    return specialty == Specialty.emergency;
+  }
+
+  double _calculateEstimatedFee(ServiceType serviceType) {
+    // Calculate fee based on service type
+    switch (serviceType) {
+      case ServiceType.doctor:
+        return 150.0;
+      case ServiceType.nurse:
+        return 80.0;
+    }
+  }
+
+  int _calculateEstimatedDuration(ServiceType serviceType) {
+    // Calculate duration in minutes based on service type
+    switch (serviceType) {
+      case ServiceType.doctor:
+        return 45;
+      case ServiceType.nurse:
+        return 30;
     }
   }
 

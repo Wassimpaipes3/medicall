@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function: Format current date as "YYYY-MM-DD"
+    function currentDate() {
+      return string(request.time.year) + '-' +
+             (request.time.month < 10 ? '0' + string(request.time.month) : string(request.time.month)) + '-' +
+             (request.time.date < 10 ? '0' + string(request.time.date) : string(request.time.date));
+    }
+
+    // === /users: Basic user metadata (role, email, name) ===
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // === /patients: Medical & personal data (sensitive!) ===
+    match /patients/{patientId} {
+      // Only the patient can read/write their own profile
+      allow read, write: if request.auth != null && request.auth.uid == patientId;
+
+      // On create: must match UID and have correct role
+      allow create: if request.auth != null
+        && request.auth.uid == patientId
+        && request.resource.data.userId == patientId
+        && request.resource.data.role == 'patient'
+        // Validate required medical fields exist
+        && request.resource.data.allergies is string
+        && request.resource.data.antecedents is string
+        && request.resource.data.groupe_sanguin is string
+        && request.resource.data.dossiers_medicaux is string
+        && request.resource.data.notifications_non_lues is int;
+    }
+
+    // === /professionnels: Doctors and nurses ===
+    match /professionnels/{proId} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+        && request.auth.uid == proId
+        && request.resource.data.userId == proId
+        && request.resource.data.role in ['doctor', 'nurse'];
+
+      allow update, delete: if request.auth != null
+        && request.auth.uid == proId
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // === /disponibilites: Professional availability slots ===
+    match /disponibilites/{id_dispo} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+        && request.resource.data.idpro == request.auth.uid
+        && exists(/databases/$(database)/documents/professionnels/$(request.auth.uid));
+
+      allow update, delete: if request.auth != null
+        && resource.data.idpro == request.auth.uid;
+    }
+
+    // === /appointments: Appointment booking system ===
+    match /appointments/{appId} {
+      allow read: if request.auth != null &&
+        (resource.data.idpat == request.auth.uid || resource.data.idpro == request.auth.uid);
+
+      allow create: if request.auth != null
+        && request.resource.data.idpat == request.auth.uid
+        && exists(/databases/$(database)/documents/patients/$(request.resource.data.idpat))
+        && exists(/databases/$(database)/documents/professionnels/$(request.resource.data.idpro))
+        && request.resource.data.date >= currentDate();
+
+      allow update, delete: if request.auth != null
+        && (resource.data.idpat == request.auth.uid || resource.data.idpro == request.auth.uid)
+        && resource.data.etat == 'pending'; // Prevent editing confirmed appointments
+    }
+
+    // === /avis: Patient reviews for professionals ===
+    match /avis/{id_avis} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+        && request.resource.data.idpat == request.auth.uid
+        && exists(/databases/$(database)/documents/patients/$(request.resource.data.idpat))
+        && exists(/databases/$(database)/documents/professionnels/$(request.resource.data.idpro))
+        && request.resource.data.note is int
+        && request.resource.data.note >= 1 && request.resource.data.note <= 5
+        && request.resource.data.commentaire is string
+        && request.resource.data.commentaire.size() > 0
+        && request.resource.data.commentaire.size() < 1000;
+
+      allow delete: if request.auth != null
+        && request.resource.data.idpat == request.auth.uid;
+    }
+
+    // === /notifications: User-specific alerts ===
+    match /notifications/{notifId} {
+      allow read: if request.auth != null
+        && resource.data.destinataire == request.auth.uid;
+
+      allow write: if false; // Only Cloud Functions can write
+    }
+  }
+}

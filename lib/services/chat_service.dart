@@ -102,7 +102,7 @@ class ChatService extends ChangeNotifier {
     // Add welcome message if conversation is new
     if (_conversations[providerId]!.isEmpty) {
       final welcomeMessage = ChatMessage(
-        id: 'welcome_${providerId}',
+        id: 'welcome_$providerId',
         content: "Hello! I'm ${_getProviderName(providerId)}. I'll be providing your healthcare service today. Feel free to message me if you have any questions.",
         senderId: providerId,
         senderName: _getProviderName(providerId),

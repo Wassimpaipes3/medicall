@@ -81,6 +81,9 @@ class AppTheme {
   static const Color textSecondaryColor = Color(0xFF64748B);
   static const Color textLightColor = Color(0xFF94A3B8);
   
+  // Border Colors
+  static const Color borderColor = Color(0xFFE2E8F0);
+  
   // Medical Specific Colors
   static const Color medicalRed = Color(0xFFEF4444);
   static const Color medicalOrange = Color(0xFFF59E0B);

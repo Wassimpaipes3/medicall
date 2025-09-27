@@ -26,11 +26,13 @@ class LocationData {
 class LocationSelectionPage extends StatefulWidget {
   final ServiceType selectedService;
   final Specialty selectedSpecialty;
+  final Map<String, dynamic>? preSelectedDoctor;
 
   const LocationSelectionPage({
     super.key,
     required this.selectedService,
     required this.selectedSpecialty,
+    this.preSelectedDoctor,
   });
 
   @override
@@ -1394,6 +1396,7 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
                 selectedService: widget.selectedService,
                 selectedSpecialty: widget.selectedSpecialty,
                 selectedLocation: _selectedLocation!,
+                preSelectedDoctor: widget.preSelectedDoctor,
               ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             const begin = Offset(1.0, 0.0);

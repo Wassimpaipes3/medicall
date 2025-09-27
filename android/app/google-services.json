@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "994771192874",
+    "project_id": "nursinghomecare-1807f",
+    "storage_bucket": "nursinghomecare-1807f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:994771192874:android:67e0bc9ee4d9a042f94753",
+        "android_client_info": {
+          "package_name": "com.example.firstv"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD4gblm7xZ6DeOP1mHZVHMDQSKitBUd00U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:994771192874:android:6c80c9f45f59152ff94753",
+        "android_client_info": {
+          "package_name": "com.yourcompany.homecareapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD4gblm7xZ6DeOP1mHZVHMDQSKitBUd00U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

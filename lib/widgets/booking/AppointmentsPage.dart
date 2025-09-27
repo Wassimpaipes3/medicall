@@ -374,7 +374,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                       leadingIcon: Icons.home_outlined,
                       onPressed: () {
                         Navigator.of(context).pushNamedAndRemoveUntil(
-                          AppRoutes.home,
+                          AppRoutes.patientNavigation,
                           (route) => false,
                         );
                       },

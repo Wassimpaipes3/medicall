@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import '../navigation/modern_navigation_bar.dart';
+import '../patient/patient_navigation_bar.dart';
 import '../../services/notification_service.dart';
 import '../../controllers/navigation_controller.dart';
 import '../../screens/home/home_screen.dart';
 import '../../screens/chat/chat_screen.dart';
 import '../../screens/appointments/appointment_screen.dart';
 import '../../screens/profile/enhanced_profile_screen.dart';
+
 
 class MainNavigationWrapper extends StatefulWidget {
   final int initialIndex;
@@ -33,24 +34,16 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
     
     // Listen to navigation controller changes
     _navController.addListener(_onNavigationChanged);
-    _notificationService.addListener(_onNotificationChanged);
   }
 
   @override
   void dispose() {
     _pageController.dispose();
     _navController.removeListener(_onNavigationChanged);
-    _notificationService.removeListener(_onNotificationChanged);
     super.dispose();
   }
 
   void _onNavigationChanged() {
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  void _onNotificationChanged() {
     if (mounted) {
       setState(() {});
     }
@@ -92,6 +85,7 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
 
   @override
   Widget build(BuildContext context) {
+    print('DEBUG: MainNavigationWrapper build called, currentIndex: $_currentIndex');
     return Scaffold(
       body: PageView(
         controller: _pageController,
@@ -103,10 +97,10 @@ class _MainNavigationWrapperState extends State<MainNavigationWrapper> {
           EnhancedProfileScreen(),
         ],
       ),
-      bottomNavigationBar: ModernNavigationBar(
-        currentIndex: _currentIndex,
+      bottomNavigationBar: PatientNavigationBar(
+        selectedIndex: _currentIndex,
         onTap: _onNavBarTapped,
-        notificationCount: _notificationService.unreadCount,
+        hasNotification: _notificationService.unreadCount > 0,
       ),
     );
   }

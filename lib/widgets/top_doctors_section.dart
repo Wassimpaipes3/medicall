@@ -7,6 +7,7 @@ class TopDoctorsSection extends StatelessWidget {
   final VoidCallback onViewAll;
   final Function(Map<String, dynamic>) onBookDoctor;
   final Function(Map<String, dynamic>)? onChatDoctor; // Added chat callback
+  final Function(Map<String, dynamic>)? onCallDoctor; // Added call callback
   final Animation<double> staggerAnimation;
 
   const TopDoctorsSection({
@@ -15,6 +16,7 @@ class TopDoctorsSection extends StatelessWidget {
     required this.onViewAll,
     required this.onBookDoctor,
     this.onChatDoctor, // Optional chat callback
+    this.onCallDoctor, // Optional call callback
     required this.staggerAnimation,
   });
 
@@ -35,7 +37,7 @@ class TopDoctorsSection extends StatelessWidget {
               
               // Doctors List
               SizedBox(
-                height: 280,
+                height: 320,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
@@ -192,7 +194,7 @@ class TopDoctorsSection extends StatelessWidget {
               // Doctor Info
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(10),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
@@ -230,13 +232,13 @@ class TopDoctorsSection extends StatelessWidget {
                         ],
                       ),
                       
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 1),
                       
                       // Specialty
                       Text(
                         doctor['specialty'],
                         style: const TextStyle(
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: FontWeight.w500,
                           color: AppTheme.textSecondaryColor,
                         ),
@@ -244,7 +246,7 @@ class TopDoctorsSection extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                       
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       
                       // Rating and Experience
                       Row(
@@ -296,7 +298,7 @@ class TopDoctorsSection extends StatelessWidget {
 
   Widget _buildDoctorImage(Map<String, dynamic> doctor) {
     return Container(
-      height: 120,
+      height: 100,
       decoration: BoxDecoration(
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(20),
@@ -374,106 +376,159 @@ class TopDoctorsSection extends StatelessWidget {
   }
 
   Widget _buildActionButtons(Map<String, dynamic> doctor) {
-    return Row(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // Chat Button
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: AppTheme.primaryColor.withOpacity(0.3),
-                width: 1,
-              ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  if (onChatDoctor != null) {
-                    onChatDoctor!(doctor);
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.chat_bubble_rounded,
-                        color: AppTheme.primaryColor,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Chat',
-                        style: TextStyle(
+        // First row - Chat and Call buttons
+        Row(
+          children: [
+            // Chat Button
+            Expanded(
+              child: Container(
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.primaryColor.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      if (onChatDoctor != null) {
+                        onChatDoctor!(doctor);
+                      }
+                    },
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_rounded,
                           color: AppTheme.primaryColor,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
+                          size: 14,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 4),
+                        Text(
+                          'Chat',
+                          style: TextStyle(
+                            color: AppTheme.primaryColor,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
+            
+            const SizedBox(width: 4),
+            
+            // Call Button
+            Expanded(
+              child: Container(
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Colors.green.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: doctor['phone'] != null && doctor['phone'].toString().isNotEmpty ? () {
+                      HapticFeedback.lightImpact();
+                      if (onCallDoctor != null) {
+                        onCallDoctor!(doctor);
+                      }
+                    } : null,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.call_rounded,
+                          color: doctor['phone'] != null && doctor['phone'].toString().isNotEmpty 
+                              ? Colors.green 
+                              : Colors.grey,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Call',
+                          style: TextStyle(
+                            color: doctor['phone'] != null && doctor['phone'].toString().isNotEmpty 
+                                ? Colors.green 
+                                : Colors.grey,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
         
-        const SizedBox(width: 8),
+        const SizedBox(height: 4),
         
-        // Book Button
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppTheme.primaryColor, AppTheme.secondaryColor],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
-              borderRadius: BorderRadius.circular(10),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primaryColor.withOpacity(0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
+        // Second row - Book button (full width)
+        Container(
+          width: double.infinity,
+          height: 38,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppTheme.primaryColor, AppTheme.secondaryColor],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
             ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: doctor['available'] ? () {
-                  HapticFeedback.mediumImpact();
-                  onBookDoctor(doctor);
-                } : null,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.calendar_today_rounded,
-                        color: doctor['available'] ? Colors.white : Colors.white54,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Book',
-                        style: TextStyle(
-                          color: doctor['available'] ? Colors.white : Colors.white54,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryColor.withOpacity(0.3),
+                blurRadius: 6,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: doctor['available'] ? () {
+                HapticFeedback.mediumImpact();
+                onBookDoctor(doctor);
+              } : null,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.calendar_today_rounded,
+                    color: doctor['available'] ? Colors.white : Colors.white54,
+                    size: 16,
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Book Appointment',
+                    style: TextStyle(
+                      color: doctor['available'] ? Colors.white : Colors.white54,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

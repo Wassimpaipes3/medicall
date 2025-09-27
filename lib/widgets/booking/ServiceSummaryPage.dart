@@ -11,12 +11,14 @@ class ServiceSummaryPage extends StatefulWidget {
   final ServiceType selectedService;
   final Specialty selectedSpecialty;
   final LocationData selectedLocation;
+  final Map<String, dynamic>? preSelectedDoctor;
 
   const ServiceSummaryPage({
     super.key,
     required this.selectedService,
     required this.selectedSpecialty,
     required this.selectedLocation,
+    this.preSelectedDoctor,
   });
 
   @override
@@ -430,12 +432,77 @@ class _ServiceSummaryPageState extends State<ServiceSummaryPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Closest Available Provider',
+            widget.preSelectedDoctor != null 
+                ? 'Selected Doctor' 
+                : 'Closest Available Provider',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.bold,
               color: const Color(0xFF1E293B),
             ),
           ),
+          if (widget.preSelectedDoctor != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F9FF),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundImage: widget.preSelectedDoctor!['image'] != null 
+                        ? AssetImage(widget.preSelectedDoctor!['image']) 
+                        : null,
+                    backgroundColor: const Color(0xFF3B82F6),
+                    child: widget.preSelectedDoctor!['image'] == null
+                        ? const Icon(Icons.person, color: Colors.white)
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.preSelectedDoctor!['name'] ?? 'Selected Doctor',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        Text(
+                          widget.preSelectedDoctor!['specialty'] ?? 'Medical Professional',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${widget.preSelectedDoctor!['rating'] ?? '4.8'} ★',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 20),
           Row(
             children: [

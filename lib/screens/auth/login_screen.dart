@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 import 'dart:ui';
 import 'package:firstv/core/theme.dart';
+import '../../services/auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen>
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _isProviderMode = false;
 
   @override
   void initState() {
@@ -311,7 +313,9 @@ class _LoginScreenState extends State<LoginScreen>
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
-                                      'Sign in to continue with MediCall',
+                                      _isProviderMode 
+                                          ? 'Access your healthcare provider dashboard'
+                                          : 'Sign in to continue with MediCall',
                                       style: TextStyle(
                                         fontSize: AppTheme.fontSizeMedium,
                                         color: AppTheme.textSecondaryColor,
@@ -322,7 +326,161 @@ class _LoginScreenState extends State<LoginScreen>
                                     ),
                                   ],
                                 ),
-                                const SizedBox(height: 32),
+                                const SizedBox(height: 24),
+
+                                // Provider/Patient Toggle
+                                Container(
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.2),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              _isProviderMode = false;
+                                            });
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            decoration: BoxDecoration(
+                                              color: !_isProviderMode
+                                                  ? AppTheme.primaryColor.withOpacity(0.2)
+                                                  : Colors.transparent,
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color: !_isProviderMode
+                                                    ? AppTheme.primaryColor.withOpacity(0.3)
+                                                    : Colors.transparent,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                Icon(
+                                                  Icons.person,
+                                                  color: !_isProviderMode
+                                                      ? AppTheme.primaryColor
+                                                      : Colors.white.withOpacity(0.7),
+                                                  size: 20,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  'Patient',
+                                                  style: TextStyle(
+                                                    color: !_isProviderMode
+                                                        ? AppTheme.primaryColor
+                                                        : Colors.white.withOpacity(0.7),
+                                                    fontWeight: FontWeight.w600,
+                                                    fontFamily: AppTheme.fontFamily,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            setState(() {
+                                              _isProviderMode = true;
+                                            });
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(vertical: 12),
+                                            decoration: BoxDecoration(
+                                              color: _isProviderMode
+                                                  ? AppTheme.primaryColor.withOpacity(0.2)
+                                                  : Colors.transparent,
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(
+                                                color: _isProviderMode
+                                                    ? AppTheme.primaryColor.withOpacity(0.3)
+                                                    : Colors.transparent,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              children: [
+                                                Icon(
+                                                  Icons.local_hospital,
+                                                  color: _isProviderMode
+                                                      ? AppTheme.primaryColor
+                                                      : Colors.white.withOpacity(0.7),
+                                                  size: 20,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  'Provider',
+                                                  style: TextStyle(
+                                                    color: _isProviderMode
+                                                        ? AppTheme.primaryColor
+                                                        : Colors.white.withOpacity(0.7),
+                                                    fontWeight: FontWeight.w600,
+                                                    fontFamily: AppTheme.fontFamily,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+
+                                // Demo Info for Provider Mode
+                                if (_isProviderMode)
+                                  Container(
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryColor.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: AppTheme.primaryColor.withOpacity(0.2),
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Icon(
+                                          Icons.info_outline,
+                                          color: AppTheme.primaryColor,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Provider Demo Access',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppTheme.textPrimaryColor,
+                                            fontFamily: AppTheme.fontFamily,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Use any email and password (min 6 characters) to access the provider dashboard with appointment management, navigation, and earnings tracking.',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: AppTheme.textSecondaryColor,
+                                            fontFamily: AppTheme.fontFamily,
+                                            height: 1.4,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+
+                                const SizedBox(height: 24),
 
                                 // Form Fields
                                 _buildTextField(
@@ -367,13 +525,65 @@ class _LoginScreenState extends State<LoginScreen>
                                         borderRadius: BorderRadius.circular(16),
                                       ),
                                     ),
-                                    onPressed: () {
+                                    onPressed: () async {
                                       if (_formKey.currentState!.validate()) {
-                                        Navigator.pushReplacementNamed(context, '/home');
+                                        // Show loading indicator
+                                        showDialog(
+                                          context: context,
+                                          barrierDismissible: false,
+                                          builder: (context) => const Center(
+                                            child: CircularProgressIndicator(),
+                                          ),
+                                        );
+
+                                        try {
+                                          // Authenticate using Firebase Auth
+                                          final authService = AuthService();
+                                          final result = await authService.signIn(
+                                            _emailController.text.trim(),
+                                            _passwordController.text,
+                                          );
+
+                                          // Hide loading dialog
+                                          Navigator.of(context).pop();
+
+                                          if (result['success'] == true) {
+                                            // Success - navigate based on user role
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('Login successful!'),
+                                                backgroundColor: Colors.green,
+                                              ),
+                                            );
+                                            
+                                            // Navigate to the route returned by role redirect service
+                                            final redirectRoute = result['redirectRoute'] ?? '/home';
+                                            Navigator.pushReplacementNamed(context, redirectRoute);
+                                          } else {
+                                            // Login failed
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text(result['error'] ?? 'Invalid email or password'),
+                                                backgroundColor: Colors.red,
+                                              ),
+                                            );
+                                          }
+                                        } catch (e) {
+                                          // Hide loading dialog
+                                          Navigator.of(context).pop();
+                                          
+                                          // Show error message
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text('Login failed: ${e.toString()}'),
+                                              backgroundColor: Colors.red,
+                                            ),
+                                          );
+                                        }
                                       }
                                     },
                                     child: Text(
-                                      'Sign In',
+                                      _isProviderMode ? 'Sign In as Provider' : 'Sign In as Patient',
                                       style: TextStyle(
                                         fontSize: AppTheme.fontSizeLarge,
                                         fontWeight: FontWeight.w600,
@@ -389,7 +599,7 @@ class _LoginScreenState extends State<LoginScreen>
                                 Center(
                                   child: TextButton(
                                     onPressed: () {
-                                      // Handle forgot password
+                                      Navigator.pushNamed(context, '/forget-password');
                                     },
                                     child: Text(
                                       'Forgot Password?',

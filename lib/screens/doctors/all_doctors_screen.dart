@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
+import '../../core/services/call_service.dart';
 
 class AllDoctorsScreen extends StatefulWidget {
   const AllDoctorsScreen({super.key});
@@ -21,169 +22,92 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
 
   final List<String> _categories = [
     'All',
-    'Doctors',
-    'Nurses',
-    'Specialists',
-    'Emergency',
+    'Cardiologist',
+    'Neurologist',
+    'Pediatrician',
+    'Orthopedic',
   ];
 
+  // Same doctors as home screen for consistency
   final List<Map<String, dynamic>> _medicalStaff = [
-    // Doctors
     {
-      'id': '1',
+      'id': 'dr_sarah',
       'name': 'Dr. Sarah Johnson',
       'specialty': 'Cardiologist',
       'type': 'Doctor',
       'rating': 4.9,
       'experience': '15 years',
+      'avatar': 'assets/images/avatar.png',
+      'available': true,
+      'consultationFee': 150,
+      'reviews': 2847,
       'location': 'Cardiology Wing, Floor 2',
-      'availability': 'Available Now',
-      'image': null,
       'phone': '+1 (555) 123-4567',
       'email': 'sarah.johnson@hospital.com',
       'languages': ['English', 'Spanish'],
       'education': 'MD from Harvard Medical School',
-      'isOnline': true,
       'nextSlot': '10:30 AM',
-      'consultationFee': '\$150',
     },
     {
-      'id': '2',
-      'name': 'Dr. Michael Chen',
-      'specialty': 'Neurologist',
+      'id': 'dr_ahmed',
+      'name': 'Dr. Ahmed Hassan',
+      'specialty': 'Neurologist', 
       'type': 'Doctor',
       'rating': 4.8,
       'experience': '12 years',
+      'avatar': 'assets/images/avatar.png',
+      'available': true,
+      'consultationFee': 200,
+      'reviews': 1923,
       'location': 'Neurology Department',
-      'availability': 'Busy',
-      'image': null,
       'phone': '+1 (555) 234-5678',
-      'email': 'michael.chen@hospital.com',
-      'languages': ['English', 'Mandarin'],
+      'email': 'ahmed.hassan@hospital.com',
+      'languages': ['English', 'Arabic'],
       'education': 'MD from Johns Hopkins',
-      'isOnline': false,
       'nextSlot': '2:15 PM',
-      'consultationFee': '\$180',
     },
     {
-      'id': '3',
-      'name': 'Dr. Emily Rodriguez',
+      'id': 'dr_maria',
+      'name': 'Dr. Maria Garcia',
       'specialty': 'Pediatrician',
       'type': 'Doctor',
       'rating': 4.9,
       'experience': '10 years',
+      'avatar': 'assets/images/avatar.png',
+      'available': false,
+      'consultationFee': 120,
+      'reviews': 3156,
       'location': 'Pediatrics Wing',
-      'availability': 'Available Now',
-      'image': null,
       'phone': '+1 (555) 345-6789',
-      'email': 'emily.rodriguez@hospital.com',
+      'email': 'maria.garcia@hospital.com',
       'languages': ['English', 'Spanish', 'French'],
       'education': 'MD from UCLA Medical School',
-      'isOnline': true,
-      'nextSlot': '11:00 AM',
-      'consultationFee': '\$120',
+      'nextSlot': 'Tomorrow 9:00 AM',
     },
-    // Nurses
     {
-      'id': '4',
-      'name': 'Nurse Lisa Thompson',
-      'specialty': 'ICU Nurse',
-      'type': 'Nurse',
+      'id': 'dr_james',
+      'name': 'Dr. James Wilson',
+      'specialty': 'Orthopedic',
+      'type': 'Doctor',
       'rating': 4.7,
-      'experience': '8 years',
-      'location': 'ICU, Floor 3',
-      'availability': 'On Duty',
-      'image': null,
-      'phone': '+1 (555) 456-7890',
-      'email': 'lisa.thompson@hospital.com',
-      'languages': ['English'],
-      'education': 'BSN from State University',
-      'isOnline': true,
-      'nextSlot': 'On Call',
-      'consultationFee': 'Covered',
-    },
-    {
-      'id': '5',
-      'name': 'Nurse David Park',
-      'specialty': 'Emergency Nurse',
-      'type': 'Nurse',
-      'rating': 4.8,
-      'experience': '6 years',
-      'location': 'Emergency Department',
-      'availability': 'On Duty',
-      'image': null,
-      'phone': '+1 (555) 567-8901',
-      'email': 'david.park@hospital.com',
-      'languages': ['English', 'Korean'],
-      'education': 'BSN from Medical University',
-      'isOnline': true,
-      'nextSlot': 'On Call',
-      'consultationFee': 'Covered',
-    },
-    // Specialists
-    {
-      'id': '6',
-      'name': 'Dr. Amanda Wilson',
-      'specialty': 'Dermatologist',
-      'type': 'Specialist',
-      'rating': 4.9,
-      'experience': '14 years',
-      'location': 'Dermatology Clinic',
-      'availability': 'Available Tomorrow',
-      'image': null,
-      'phone': '+1 (555) 678-9012',
-      'email': 'amanda.wilson@hospital.com',
-      'languages': ['English', 'German'],
-      'education': 'MD from Mayo Clinic',
-      'isOnline': false,
-      'nextSlot': '9:00 AM Tomorrow',
-      'consultationFee': '\$200',
-    },
-    {
-      'id': '7',
-      'name': 'Dr. Robert Kim',
-      'specialty': 'Orthopedic Surgeon',
-      'type': 'Specialist',
-      'rating': 4.8,
       'experience': '18 years',
-      'location': 'Orthopedic Surgery',
-      'availability': 'Available Now',
-      'image': null,
-      'phone': '+1 (555) 789-0123',
-      'email': 'robert.kim@hospital.com',
-      'languages': ['English', 'Korean'],
-      'education': 'MD from Stanford Medical',
-      'isOnline': true,
-      'nextSlot': '1:30 PM',
-      'consultationFee': '\$250',
-    },
-    // Emergency Staff
-    {
-      'id': '8',
-      'name': 'Dr. Jessica Martinez',
-      'specialty': 'Emergency Medicine',
-      'type': 'Emergency',
-      'rating': 4.9,
-      'experience': '11 years',
-      'location': 'Emergency Department',
-      'availability': 'On Call 24/7',
-      'image': null,
-      'phone': '+1 (555) 890-1234',
-      'email': 'jessica.martinez@hospital.com',
-      'languages': ['English', 'Spanish'],
-      'education': 'MD from Emergency Medicine Institute',
-      'isOnline': true,
-      'nextSlot': 'Available Now',
-      'consultationFee': 'Emergency Rate',
+      'avatar': 'assets/images/avatar.png',
+      'available': true,
+      'consultationFee': 180,
+      'reviews': 2234,
+      'location': 'Orthopedic Wing, Floor 4',
+      'phone': '+1 (555) 456-7890',
+      'email': 'james.wilson@hospital.com',
+      'languages': ['English'],
+      'education': 'MD from Harvard Medical School',
+      'nextSlot': '1:45 PM',
     },
   ];
 
   List<Map<String, dynamic>> get _filteredStaff {
     return _medicalStaff.where((staff) {
       final matchesCategory = _selectedCategory == 'All' || 
-                              staff['type'].toLowerCase() == _selectedCategory.toLowerCase() ||
-                              (_selectedCategory == 'Specialists' && staff['type'] == 'Specialist') ||
-                              (_selectedCategory == 'Emergency' && staff['type'] == 'Emergency');
+                              staff['specialty'].toLowerCase().contains(_selectedCategory.toLowerCase());
       
       final matchesSearch = _searchQuery.isEmpty ||
                            staff['name'].toLowerCase().contains(_searchQuery.toLowerCase()) ||
@@ -313,7 +237,10 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
               subtitle: Text(staff['phone']),
               onTap: () {
                 Navigator.pop(context);
-                // Handle phone call
+                CallService.makeCall(
+                  staff['phone'],
+                  context: context,
+                );
               },
             ),
             ListTile(
@@ -335,7 +262,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                 // Handle email
               },
             ),
-            if (staff['isOnline'])
+            if (staff['available'])
               ListTile(
                 leading: Container(
                   width: 48,
@@ -368,7 +295,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text(
-          'Medical Staff Directory',
+          'Top Doctors',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         backgroundColor: Colors.white,
@@ -591,7 +518,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                         size: 28,
                       ),
                     ),
-                    if (staff['isOnline'])
+                    if (staff['available'])
                       Positioned(
                         bottom: 0,
                         right: 0,
@@ -654,11 +581,11 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
             // Status and Details
             Row(
               children: [
-                _buildStatusBadge(staff['availability'], staff['isOnline']),
+                _buildStatusBadge(staff['available'] ? 'Available Now' : 'Unavailable', staff['available']),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Next: ${staff['nextSlot']} • ${staff['consultationFee']}',
+                    'Next: ${staff['nextSlot']} • \$${staff['consultationFee']}',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppTheme.textSecondaryColor,
@@ -799,7 +726,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
           _buildDetailSection('Education', staff['education']),
           _buildDetailSection('Location', staff['location']),
           _buildDetailSection('Languages', staff['languages'].join(', ')),
-          _buildDetailSection('Consultation Fee', staff['consultationFee']),
+          _buildDetailSection('Consultation Fee', '\$${staff['consultationFee']}'),
           
           const SizedBox(height: 24),
           

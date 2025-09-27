@@ -1,24 +1,45 @@
-import 'package:firstv/core/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firstv/core/theme.dart';
 import 'package:firstv/screens/splash/splash_screen.dart';
 import 'package:firstv/screens/onboarding/onboarding_screens.dart';
 import 'package:firstv/screens/auth/login_screen.dart';
 import 'package:firstv/screens/auth/signup_screen.dart';
+import 'package:firstv/screens/auth/forget_password_screen.dart';
 import 'package:firstv/routes/app_routes.dart';
-import 'package:firstv/screens/home/home_screen.dart';
+import 'package:firstv/widgets/navigation/patient_navigation_wrapper.dart';
 import 'package:firstv/screens/doctors/all_doctors_screen.dart';
+import 'package:firstv/screens/chat/chat_screen.dart';
+import 'package:firstv/screens/appointments/appointment_screen.dart';
 import 'package:firstv/screens/notifications/notifications_screen.dart';
 import 'package:firstv/screens/profile/enhanced_profile_screen.dart';
 import 'package:firstv/screens/chat/provider_chat_screen.dart';
 import 'package:firstv/screens/booking/live_tracking_screen.dart';
 import 'package:firstv/services/notification_service.dart';
+// Provider Screens
+import 'package:firstv/screens/provider/provider_dashboard_screen.dart';
+import 'package:firstv/screens/provider/provider_login_screen.dart';
+import 'package:firstv/screens/provider/provider_navigation_screen.dart';
+import 'package:firstv/screens/provider/provider_messages_screen.dart';
+import 'package:firstv/screens/provider/provider_earnings_screen.dart';
+import 'package:firstv/screens/provider/appointment_management_screen.dart';
+import 'package:firstv/screens/provider/enhanced_profile_screen.dart' as ProviderEnhanced;
+import 'package:firstv/screens/provider/enhanced_messages_screen.dart';
+import 'package:firstv/screens/provider/enhanced_earnings_screen.dart';
+import 'package:firstv/screens/provider/enhanced_appointment_management_screen.dart';
 // Booking Flow Imports
 import 'package:firstv/widgets/booking/ServiceSelectionPage.dart';
 import 'package:firstv/widgets/booking/AppointmentsPage.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   
   // Initialize services
   NotificationService().initializeMockData();
@@ -51,8 +72,8 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
 
-      // Set back to home for normal app flow
-      initialRoute: AppRoutes.home,
+      // Start with splash screen for proper app flow
+      initialRoute: AppRoutes.splash,
       builder: (context, child) {
         return MediaQuery(
           data: MediaQuery.of(context).copyWith(
@@ -66,7 +87,11 @@ class MyApp extends StatelessWidget {
         AppRoutes.onboarding: (context) => const OnboardingScreen(),
         AppRoutes.login: (context) => const LoginScreen(),
         AppRoutes.signup: (context) => const SignUpScreen(),
-        AppRoutes.home: (context) => const HomeScreen(),
+        AppRoutes.forgetPassword: (context) => const ForgetPasswordScreen(),
+        AppRoutes.home: (context) => const PatientNavigationWrapper(),
+        AppRoutes.patientNavigation: (context) => const PatientNavigationWrapper(),
+        AppRoutes.chatPage: (context) => const ChatScreen(),
+        AppRoutes.schedule: (context) => const AppointmentScreen(),
         AppRoutes.doctors: (context) => const AllDoctorsScreen(),
         AppRoutes.notifications: (context) => const NotificationsScreen(),
         AppRoutes.serviceSelection: (context) => const ServiceSelectionPage(),
@@ -77,6 +102,19 @@ class MyApp extends StatelessWidget {
           providerId: 'provider_1',
           providerName: 'Dr. Sarah Johnson',
         ),
+        // Provider Routes
+        AppRoutes.providerDashboard: (context) => const ProviderDashboardScreen(),
+        AppRoutes.providerLogin: (context) => const ProviderLoginScreen(),
+        AppRoutes.providerNavigation: (context) => const ProviderNavigationScreen(),
+        AppRoutes.providerProfile: (context) => const ProviderEnhanced.EnhancedProfileScreen(),
+        AppRoutes.providerMessages: (context) => const ProviderMessagesScreen(),
+        AppRoutes.providerEarnings: (context) => const ProviderEarningsScreen(),
+        AppRoutes.providerAppointments: (context) => const AppointmentManagementScreen(),
+        // Enhanced Provider Routes (keeping for compatibility)
+        AppRoutes.enhancedProfile: (context) => const ProviderEnhanced.EnhancedProfileScreen(),
+        AppRoutes.enhancedMessages: (context) => const EnhancedMessagesScreen(),
+        AppRoutes.enhancedEarnings: (context) => const EnhancedEarningsScreen(),
+        AppRoutes.enhancedAppointmentManagement: (context) => const EnhancedAppointmentManagementScreen(),
       },
     );
   }

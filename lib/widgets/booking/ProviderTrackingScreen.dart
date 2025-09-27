@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/enhanced_theme.dart';
+import '../../core/services/call_service.dart';
 import '../maps/flutter_map_tracking_widget.dart';
 import '../../data/models/location_models.dart';
 import '../../data/services/enhanced_provider_tracking_service.dart';
@@ -17,6 +17,7 @@ class ProviderTrackingScreen extends StatefulWidget {
   final Specialty selectedSpecialty;
   final LocationData selectedLocation;
   final String appointmentId;
+  final Map<String, dynamic>? preSelectedDoctor;
   
   const ProviderTrackingScreen({
     super.key,
@@ -24,6 +25,7 @@ class ProviderTrackingScreen extends StatefulWidget {
     required this.selectedSpecialty,
     required this.selectedLocation,
     required this.appointmentId,
+    this.preSelectedDoctor,
   });
 
   @override
@@ -118,32 +120,67 @@ class _ProviderTrackingScreenState extends State<ProviderTrackingScreen>
       // Simulate finding provider (in real app, this would be an API call)
       await Future.delayed(const Duration(seconds: 2));
       
-      // Get nearby providers
-      final providers = await _trackingService.getNearbyProviders(
-        patientLocation: _currentLocation!,
-        radiusInKm: 10.0,
-        serviceType: widget.selectedService,
-      );
-      
-      // Apply specialty filtering if we have providers
-      List<HealthcareProvider> filteredProviders = providers;
-      if (providers.isNotEmpty && widget.selectedService == ServiceType.doctor) {
-        // Use the selected specialty for filtering
-        String targetSpecialty = widget.selectedSpecialty.toString().split('.').last;
-        filteredProviders = _filterProvidersBySpecialty(providers, targetSpecialty);
+      // Check if we have a pre-selected doctor
+      if (widget.preSelectedDoctor != null) {
+        // Create HealthcareProvider from pre-selected doctor
+        final doctor = widget.preSelectedDoctor!;
+        final selectedProvider = HealthcareProvider(
+          id: doctor['id'] ?? 'selected_doctor',
+          name: doctor['name'] ?? 'Selected Doctor',
+          specialty: doctor['specialty'] ?? 'Medical Professional',
+          rating: (doctor['rating'] ?? 4.8).toDouble(),
+          currentLocation: UserLocation(
+            latitude: doctor['latitude'] ?? 36.7538,
+            longitude: doctor['longitude'] ?? 3.0588,
+            address: doctor['address'] ?? doctor['location'] ?? 'Algeria',
+            timestamp: DateTime.now(),
+          ),
+          status: ProviderStatus.enRoute,
+          totalReviews: doctor['reviews'] ?? 100,
+          profileImage: doctor['avatar'] ?? 'assets/images/avatar.png',
+          phoneNumber: '+213 ${doctor['id']?.hashCode.abs().toString().substring(0, 8)}',
+          services: [doctor['specialty'] ?? 'General Medicine'],
+          pricing: {'consultation': (doctor['consultationFee'] ?? 150).toDouble()},
+          distanceFromPatient: 2.5, // Default distance
+          estimatedArrivalMinutes: 15,
+        );
         
-        // If no specialty match found, fall back to all providers
-        if (filteredProviders.isEmpty) {
-          filteredProviders = providers;
+        setState(() {
+          _assignedProvider = selectedProvider;
+          _isLoading = false;
+          _statusMessage = "${doctor['name']} is assigned and on the way!";
+        });
+      } else {
+        // Get nearby providers (original logic)
+        final providers = await _trackingService.getNearbyProviders(
+          patientLocation: _currentLocation!,
+          radiusInKm: 10.0,
+          serviceType: widget.selectedService,
+        );
+        
+        // Apply specialty filtering if we have providers
+        List<HealthcareProvider> filteredProviders = providers;
+        if (providers.isNotEmpty && widget.selectedService == ServiceType.doctor) {
+          // Use the selected specialty for filtering
+          String targetSpecialty = widget.selectedSpecialty.toString().split('.').last;
+          filteredProviders = _filterProvidersBySpecialty(providers, targetSpecialty);
+          
+          // If no specialty match found, fall back to all providers
+          if (filteredProviders.isEmpty) {
+            filteredProviders = providers;
+          }
+        }
+        
+        if (filteredProviders.isNotEmpty) {
+          setState(() {
+            _assignedProvider = filteredProviders.first;
+            _isLoading = false;
+            _statusMessage = "Provider assigned and on the way!";
+          });
         }
       }
       
-      if (filteredProviders.isNotEmpty) {
-        setState(() {
-          _assignedProvider = filteredProviders.first;
-          _isLoading = false;
-          _statusMessage = "Provider assigned and on the way!";
-        });
+      if (_assignedProvider != null) {
         
         // Start tracking the assigned provider
         _trackingService.startProviderTracking(_assignedProvider!.id);
@@ -1150,34 +1187,19 @@ class _ProviderTrackingScreenState extends State<ProviderTrackingScreen>
 
   void _makeCall() async {
     if (_assignedProvider != null) {
-      HapticFeedback.lightImpact();
-      
-      // In a real app, you would get the provider's phone number from the provider data
-      final phoneNumber = _assignedProvider!.phoneNumber ?? '+1-555-0123';
-      final Uri phoneUri = Uri(scheme: 'tel', path: phoneNumber);
-      
-      try {
-        if (await canLaunchUrl(phoneUri)) {
-          await launchUrl(phoneUri);
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Unable to make phone call'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Error making phone call'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
+      final phoneNumber = _assignedProvider!.phoneNumber;
+      await CallService.makeCall(
+        phoneNumber,
+        context: context,
+      );
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No provider assigned yet'),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
     }
   }
@@ -1208,7 +1230,10 @@ class _ProviderTrackingScreenState extends State<ProviderTrackingScreen>
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              // Implement emergency call
+              CallService.makeEmergencyCall(
+                context: context,
+                showConfirmation: false,
+              );
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: EnhancedAppTheme.dangerRed,

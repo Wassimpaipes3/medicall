@@ -149,6 +149,7 @@ class _AlgeriaLocationSelectionPageState extends State<AlgeriaLocationSelectionP
               latitude: _selectedLocation!['lat'],
               longitude: _selectedLocation!['lng'],
             ),
+            preSelectedDoctor: null,
           ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return SlideTransition(

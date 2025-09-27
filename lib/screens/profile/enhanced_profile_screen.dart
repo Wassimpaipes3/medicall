@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
-import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import '../../core/enhanced_theme.dart';
 import '../../data/services/appointment_storage.dart';
+import '../../widgets/profile/profile_picture_widget.dart';
 import 'personal_information_screen.dart';
 import 'medical_history_screen.dart';
 import '../doctors/all_doctors_screen.dart';
@@ -21,15 +23,22 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
-  File? _profileImage;
-  final ImagePicker _picker = ImagePicker();
+  // Firebase instances
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
   List<Map<String, dynamic>> _userAppointments = [];
+  
+  // User data from Firebase
+  User? _currentUser;
+  StreamSubscription<DocumentSnapshot>? _userDataSubscription;
+  bool _isLoadingUserData = true;
 
-  // Enhanced user data
-  final Map<String, dynamic> _userData = {
-    'name': 'Wassim Ahmed',
-    'email': 'wassim@healthcare.com',
-    'phone': '+1 (555) 123-4567',
+  // Enhanced user data (will be loaded from Firebase)
+  Map<String, dynamic> _userData = {
+    'name': 'Loading...',
+    'email': 'Loading...',
+    'phone': 'Loading...',
     'dateOfBirth': '1990-05-15',
     'bloodType': 'O+',
     'emergencyContact': '+1 (555) 987-6543',
@@ -103,6 +112,8 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen>
     super.initState();
     _initializeAnimations();
     _loadUserAppointments();
+    _loadUserDataFromFirebase();
+    _setupRealtimeUserListener();
     _animationController.forward();
   }
 
@@ -140,141 +151,88 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen>
     }
   }
 
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _showImageSourceDialog() async {
-    HapticFeedback.lightImpact();
-    
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(20),
-              child: Text(
-                'Update Profile Picture',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1E293B),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: EnhancedAppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.camera_alt_rounded, color: Colors.white),
-              ),
-              title: const Text(
-                'Take Photo',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: const Text('Capture with camera'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.purple, Colors.pink],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.photo_library_rounded, color: Colors.white),
-              ),
-              title: const Text(
-                'Choose from Gallery',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: const Text('Select from photos'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.gallery);
-              },
-            ),
-            if (_profileImage != null)
-              ListTile(
-                leading: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.red, Colors.orange],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.delete_rounded, color: Colors.white),
-                ),
-                title: const Text(
-                  'Remove Photo',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: const Text('Use default avatar'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _removeProfileImage();
-                },
-              ),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pickImage(ImageSource source) async {
-    try {
-      final XFile? image = await _picker.pickImage(
-        source: source,
-        maxWidth: 500,
-        maxHeight: 500,
-        imageQuality: 80,
-      );
-      
-      if (image != null) {
-        setState(() {
-          _profileImage = File(image.path);
-        });
+  Future<void> _loadUserDataFromFirebase() async {
+    _currentUser = _auth.currentUser;
+    if (_currentUser != null) {
+      try {
+        DocumentSnapshot userDoc = await _firestore
+            .collection('users')
+            .doc(_currentUser!.uid)
+            .get();
         
-        HapticFeedback.lightImpact();
+        if (userDoc.exists && mounted) {
+          final data = userDoc.data() as Map<String, dynamic>?;
+          setState(() {
+            _userData = {
+              'name': data?['name'] ?? _currentUser?.displayName ?? 'User',
+              'email': data?['email'] ?? _currentUser?.email ?? '',
+              'phone': data?['phone'] ?? '+1 (555) 123-4567',
+              'dateOfBirth': data?['dateOfBirth'] ?? '1990-05-15',
+              'bloodType': data?['bloodType'] ?? 'O+',
+              'emergencyContact': data?['emergencyContact'] ?? '+1 (555) 987-6543',
+              'address': data?['address'] ?? '123 Healthcare St, Medical City',
+              'insuranceProvider': data?['insuranceProvider'] ?? 'HealthCare Plus Premium',
+              'membershipTier': data?['membershipTier'] ?? 'Gold Member',
+              'joinDate': data?['joinDate'] ?? '2023-01-15',
+            };
+            _isLoadingUserData = false;
+          });
+        }
+      } catch (e) {
+        print('Error loading user data: $e');
+        setState(() => _isLoadingUserData = false);
+      }
+    } else {
+      setState(() => _isLoadingUserData = false);
+    }
+  }
+
+  void _setupRealtimeUserListener() {
+    if (_currentUser != null) {
+      _userDataSubscription = _firestore
+          .collection('users')
+          .doc(_currentUser!.uid)
+          .snapshots()
+          .listen((snapshot) {
+        if (snapshot.exists && mounted) {
+          final data = snapshot.data();
+          setState(() {
+            _userData = {
+              'name': data?['name'] ?? _currentUser?.displayName ?? 'User',
+              'email': data?['email'] ?? _currentUser?.email ?? '',
+              'phone': data?['phone'] ?? '+1 (555) 123-4567',
+              'dateOfBirth': data?['dateOfBirth'] ?? '1990-05-15',
+              'bloodType': data?['bloodType'] ?? 'O+',
+              'emergencyContact': data?['emergencyContact'] ?? '+1 (555) 987-6543',
+              'address': data?['address'] ?? '123 Healthcare St, Medical City',
+              'insuranceProvider': data?['insuranceProvider'] ?? 'HealthCare Plus Premium',
+              'membershipTier': data?['membershipTier'] ?? 'Gold Member',
+              'joinDate': data?['joinDate'] ?? '2023-01-15',
+            };
+          });
+        }
+      });
+    }
+  }
+
+  Future<void> _updateUserProfileInFirebase(Map<String, dynamic> updates) async {
+    if (_currentUser != null) {
+      try {
+        await _firestore.collection('users').doc(_currentUser!.uid).set(
+          {
+            ...updates,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
         
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
+            content: const Row(
               children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white),
-                const SizedBox(width: 12),
-                const Text('Profile picture updated successfully! ⚡'),
+                Icon(Icons.check_circle_rounded, color: Colors.white),
+                SizedBox(width: 12),
+                Text('Profile updated successfully! ✨'),
               ],
             ),
             backgroundColor: EnhancedAppTheme.successGreen,
@@ -282,33 +240,27 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen>
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating profile: $e'),
+            backgroundColor: EnhancedAppTheme.dangerRed,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error updating profile picture: $e'),
-          backgroundColor: EnhancedAppTheme.dangerRed,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      );
     }
   }
 
-  void _removeProfileImage() {
-    setState(() {
-      _profileImage = null;
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Profile picture removed'),
-        backgroundColor: Color(0xFF64748B),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
+  @override
+  void dispose() {
+    _animationController.dispose();
+    _userDataSubscription?.cancel();
+    super.dispose();
   }
+
+
 
   void _logout() {
     HapticFeedback.mediumImpact();
@@ -342,10 +294,19 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen>
           ),
           Flexible(
             child: ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.pop(context);
-                // Navigate to login screen - replace with your login route
-                Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                try {
+                  await _auth.signOut();
+                  Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+                } catch (e) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error signing out: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
@@ -552,7 +513,7 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen>
       backgroundColor: Colors.white,
       leading: IconButton(
         onPressed: () {
-          Navigator.pushReplacementNamed(context, '/home');
+          Navigator.pushReplacementNamed(context, '/login');
         },
         icon: Container(
           padding: const EdgeInsets.all(8),
@@ -622,81 +583,38 @@ class _EnhancedProfileScreenState extends State<EnhancedProfileScreen>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const SizedBox(height: 20), // Further reduced from 30 to 20
-                  Stack(
-                  children: [
-                    Container(
-                      width: 85, // Further reduced from 100 to 85
-                      height: 85, // Further reduced from 100 to 85
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [EnhancedAppTheme.primaryIndigo, EnhancedAppTheme.primaryPurple],
+                ProfilePicturePicker(
+                  size: 85,
+                  showEditIcon: true,
+                  isCircular: true,
+                  borderColor: EnhancedAppTheme.primaryIndigo,
+                  borderWidth: 3,
+                  onImageUploaded: (imageUrl) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Row(
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: Colors.white),
+                            const SizedBox(width: 12),
+                            const Text('Photo de profil mise à jour avec succès! ⚡'),
+                          ],
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: EnhancedAppTheme.primaryIndigo.withOpacity(0.3),
-                            blurRadius: 20,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
+                        backgroundColor: EnhancedAppTheme.successGreen,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: _profileImage != null
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(42.5), // Adjusted for new size
-                              child: Image.file(
-                                _profileImage!,
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          : ClipRRect(
-                              borderRadius: BorderRadius.circular(42.5), // Adjusted for new size
-                              child: Image.asset(
-                                'assets/images/avatar.png',
-                                fit: BoxFit.cover,
-                                width: 85,
-                                height: 85,
-                                errorBuilder: (context, error, stackTrace) {
-                                  // Fallback to icon if image fails to load
-                                  return const Icon(
-                                    Icons.person_rounded,
-                                    size: 42, // Reduced from 50 to 42
-                                    color: Colors.white,
-                                  );
-                                },
-                              ),
-                            ),
-                    ),
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: GestureDetector(
-                        onTap: _showImageSourceDialog,
-                        child: Container(
-                          width: 32, // Reduced from 36 to 32
-                          height: 32, // Reduced from 36 to 32
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [EnhancedAppTheme.primaryPurple, Colors.green],
-                            ),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 3),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
-                                blurRadius: 8,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.camera_alt_rounded,
-                            size: 18,
-                            color: Colors.white,
-                          ),
-                        ),
+                    );
+                  },
+                  onImageDeleted: (imageUrl) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('Photo de profil supprimée'),
+                        backgroundColor: Color(0xFF64748B),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                    ),
-                  ],
+                    );
+                  },
                 ),
                 const SizedBox(height: 8), // Reduced from 12 to 8
                 Text(

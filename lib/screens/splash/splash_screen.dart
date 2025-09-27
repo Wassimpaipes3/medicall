@@ -1,7 +1,6 @@
 // lib/screens/splash/splash_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:firstv/routes/app_routes.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -32,12 +31,18 @@ class _SplashScreenState extends State<SplashScreen>
     );
 
     _controller.forward();
+    _checkAuthenticationAndNavigate();
+  }
 
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, AppRoutes.onboarding);
-      }
-    });
+  Future<void> _checkAuthenticationAndNavigate() async {
+    // Wait for splash animation
+    await Future.delayed(const Duration(seconds: 2));
+    
+    if (!mounted) return;
+
+    // Always go to onboarding first, like it was before
+    print('� Splash completed, showing onboarding');
+    Navigator.pushReplacementNamed(context, '/onboarding');
   }
 
   @override

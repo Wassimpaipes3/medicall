@@ -29,7 +29,7 @@ class _ProviderChatScreenState extends State<ProviderChatScreen> {
   final LocationService _locationService = LocationService();
   
   bool _showQuickReplies = false;
-  bool _isProviderOnline = true;
+  final bool _isProviderOnline = true;
 
   final List<String> _quickReplies = [
     "I'm here and ready",

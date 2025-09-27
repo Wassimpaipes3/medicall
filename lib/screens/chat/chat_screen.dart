@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import '../../core/theme.dart';
 import '../../controllers/navigation_controller.dart';
 import 'ai_chat_screen.dart';
-import 'provider_chat_screen.dart';
+import 'patient_chat_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -112,6 +112,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _openChat(Map<String, dynamic> chat) {
+    // Store chat context for navigation consistency
+    HapticFeedback.lightImpact();
+    
     if (chat['isAI'] == true) {
       Navigator.push(
         context,
@@ -133,10 +136,15 @@ class _ChatScreenState extends State<ChatScreen>
         context,
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) => 
-              ProviderChatScreen(
-                providerId: chat['id']?.toString() ?? 'unknown',
-                providerName: chat['name']?.toString() ?? 'Provider',
-                specialty: chat['specialty']?.toString(),
+              PatientChatScreen(
+                doctorInfo: {
+                  'id': chat['id']?.toString() ?? 'unknown',
+                  'name': chat['name']?.toString() ?? 'Provider',
+                  'specialty': chat['specialty']?.toString() ?? 'General Physician',
+                  'isOnline': chat['isOnline'] ?? true,
+                  'rating': '4.8',
+                  'experience': '10+',
+                },
               ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             return SlideTransition(

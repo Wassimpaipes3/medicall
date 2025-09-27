@@ -25,14 +25,7 @@ class _AppointmentScreenState extends State<AppointmentScreen>
   List<Map<String, dynamic>> _appointments = [];
   bool _isLoading = true;
 
-  final List<String> _timeSlots = [
-    '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-    '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
-  ];
 
-  DateTime _selectedDate = DateTime.now().add(const Duration(days: 1));
-  String? _selectedTimeSlot;
-  int _currentTabIndex = 0;
 
   @override
   void initState() {
@@ -48,32 +41,36 @@ class _AppointmentScreenState extends State<AppointmentScreen>
       final appointments = await AppointmentStorage.getAllAppointments();
       print('DEBUG: Loaded ${appointments.length} appointments from storage');
       
-      setState(() {
-        _appointments = appointments.map((appointment) {
-          final mappedAppointment = {
-            'id': appointment['id'] ?? '',
-            'doctorName': _getServiceTitle(appointment),
-            'specialty': _getSpecialtyName(appointment),
-            'date': _formatDate(appointment['appointmentTime'] ?? ''),
-            'time': _formatTime(appointment['appointmentTime'] ?? ''),
-            'status': appointment['status'] ?? 'scheduled',
-            'type': 'Consultation',
-            'location': appointment['locationName'] ?? '',
-            'avatar': 'assets/images/medlogo.png',
-            'totalPrice': appointment['totalPrice'] ?? 0.0,
-            'paymentMethod': appointment['paymentMethod'] ?? '',
-          };
-          print('DEBUG: Mapped appointment - ID: ${mappedAppointment['id']}, Doctor: ${mappedAppointment['doctorName']}, Status: ${mappedAppointment['status']}');
-          return mappedAppointment;
-        }).toList();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _appointments = appointments.map((appointment) {
+            final mappedAppointment = {
+              'id': appointment['id'] ?? '',
+              'doctorName': _getServiceTitle(appointment),
+              'specialty': _getSpecialtyName(appointment),
+              'date': _formatDate(appointment['appointmentTime'] ?? ''),
+              'time': _formatTime(appointment['appointmentTime'] ?? ''),
+              'status': appointment['status'] ?? 'scheduled',
+              'type': 'Consultation',
+              'location': appointment['locationName'] ?? '',
+              'avatar': 'assets/images/medlogo.png',
+              'totalPrice': appointment['totalPrice'] ?? 0.0,
+              'paymentMethod': appointment['paymentMethod'] ?? '',
+            };
+            print('DEBUG: Mapped appointment - ID: ${mappedAppointment['id']}, Doctor: ${mappedAppointment['doctorName']}, Status: ${mappedAppointment['status']}');
+            return mappedAppointment;
+          }).toList();
+          _isLoading = false;
+        });
+      }
       print('DEBUG: State updated with ${_appointments.length} appointments');
     } catch (e) {
       print('DEBUG: Error loading appointments: $e');
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
       print('Error loading appointments: $e');
     }
   }
@@ -150,66 +147,7 @@ class _AppointmentScreenState extends State<AppointmentScreen>
     super.dispose();
   }
 
-  void _selectDate() async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: AppTheme.primaryColor,
-              onPrimary: Colors.white,
-              surface: Colors.white,
-              onSurface: AppTheme.textPrimaryColor,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
 
-    if (picked != null && picked != _selectedDate) {
-      setState(() {
-        _selectedDate = picked;
-        _selectedTimeSlot = null; // Reset time selection
-      });
-    }
-  }
-
-  void _bookAppointment() {
-    if (_selectedTimeSlot == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a time slot'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    // Simulate booking
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Appointment Booked!'),
-        content: Text(
-          'Your appointment has been booked for ${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year} at $_selectedTimeSlot',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
 
   Future<void> _markAsCompleted(Map<String, dynamic> appointment) async {
     try {
@@ -376,7 +314,7 @@ class _AppointmentScreenState extends State<AppointmentScreen>
           },
         ),
         title: const Text(
-          'Appointments',
+          'My Schedule',
           style: TextStyle(
             color: AppTheme.textPrimaryColor,
             fontWeight: FontWeight.w700,
@@ -400,11 +338,49 @@ class _AppointmentScreenState extends State<AppointmentScreen>
                     )
                   : Column(
                       children: [
-                        _buildTabBar(),
+                        // Schedule header with calendar view indicator
+                        Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.primaryColor.withOpacity(0.2),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.calendar_today_rounded,
+                                color: AppTheme.primaryColor,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Your Schedule',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.textPrimaryColor,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '${_appointments.length} ${_appointments.length == 1 ? 'appointment' : 'appointments'}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: AppTheme.primaryColor,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Show appointments directly (schedule view)
                         Expanded(
-                          child: _currentTabIndex == 0 
-                              ? _buildMyAppointments()
-                              : _buildBookAppointment(),
+                          child: _buildMyAppointments(),
                         ),
                       ],
                     ),
@@ -427,69 +403,6 @@ class _AppointmentScreenState extends State<AppointmentScreen>
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabBar() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          _buildTabButton('My Appointments', 0),
-          _buildTabButton('Book New', 1),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabButton(String title, int index) {
-    final isSelected = _currentTabIndex == index;
-    
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          if (index == 1) {
-            // If "Book New" is tapped, launch the comprehensive booking system
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const ServiceSelectionPage()),
-            );
-          } else {
-            setState(() {
-              _currentTabIndex = index;
-            });
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            color: isSelected ? AppTheme.primaryColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: isSelected ? Colors.white : AppTheme.textSecondaryColor,
-              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              fontSize: 16,
-            ),
           ),
         ),
       ),
@@ -732,253 +645,6 @@ class _AppointmentScreenState extends State<AppointmentScreen>
     );
   }
 
-  Widget _buildBookAppointment() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (widget.selectedDoctor != null)
-            _buildSelectedDoctorCard(),
-          
-          _buildDateSelection(),
-          const SizedBox(height: 24),
-          _buildTimeSlotSelection(),
-          const SizedBox(height: 32),
-          _buildBookButton(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSelectedDoctorCard() {
-    final doctor = widget.selectedDoctor!;
-    
-    return Container(
-      margin: const EdgeInsets.only(bottom: 24),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppTheme.primaryColor, AppTheme.secondaryColor],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(30),
-            ),
-            child: const Icon(
-              Icons.person_rounded,
-              color: Colors.white,
-              size: 30,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  doctor['name'],
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  doctor['specialty'],
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDateSelection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Select Date',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimaryColor,
-          ),
-        ),
-        const SizedBox(height: 12),
-        GestureDetector(
-          onTap: _selectDate,
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: AppTheme.primaryColor.withOpacity(0.3),
-              ),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.calendar_today_rounded,
-                  color: AppTheme.primaryColor,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  '${_selectedDate.day}/${_selectedDate.month}/${_selectedDate.year}',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimaryColor,
-                  ),
-                ),
-                const Spacer(),
-                Icon(
-                  Icons.arrow_drop_down_rounded,
-                  color: AppTheme.primaryColor,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTimeSlotSelection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Available Time Slots',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppTheme.textPrimaryColor,
-          ),
-        ),
-        const SizedBox(height: 12),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            childAspectRatio: 2.5,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-          ),
-          itemCount: _timeSlots.length,
-          itemBuilder: (context, index) {
-            final timeSlot = _timeSlots[index];
-            final isSelected = _selectedTimeSlot == timeSlot;
-            
-            return GestureDetector(
-              onTap: () {
-                HapticFeedback.lightImpact();
-                setState(() {
-                  _selectedTimeSlot = timeSlot;
-                });
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isSelected 
-                      ? AppTheme.primaryColor 
-                      : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isSelected 
-                        ? AppTheme.primaryColor 
-                        : AppTheme.primaryColor.withOpacity(0.3),
-                  ),
-                ),
-                child: Center(
-                  child: Text(
-                    timeSlot,
-                    style: TextStyle(
-                      color: isSelected 
-                          ? Colors.white 
-                          : AppTheme.textPrimaryColor,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBookButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [AppTheme.primaryColor, AppTheme.secondaryColor],
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-          ),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.primaryColor.withOpacity(0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: _bookAppointment,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.calendar_month_rounded,
-                    color: Colors.white,
-                    size: 24,
-                  ),
-                  SizedBox(width: 12),
-                  Text(
-                    'Book Appointment',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildEmptyAppointments() {
     return Center(
       child: Column(
@@ -998,7 +664,7 @@ class _AppointmentScreenState extends State<AppointmentScreen>
           ),
           const SizedBox(height: 24),
           const Text(
-            'No appointments scheduled',
+            'Your schedule is clear',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w700,
@@ -1007,7 +673,7 @@ class _AppointmentScreenState extends State<AppointmentScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'Book your first appointment to get started',
+            'Tap the "Book Service" button below to schedule your first appointment',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,

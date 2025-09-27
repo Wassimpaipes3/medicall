@@ -971,6 +971,7 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
                 selectedService: widget.selectedService,
                 selectedSpecialty: widget.selectedSpecialty,
                 selectedLocation: _selectedLocation!,
+                preSelectedDoctor: null,
               ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             const begin = Offset(1.0, 0.0);

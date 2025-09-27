@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
+import '../profile/profile_picture_widget.dart';
 
 class CustomAppBar extends StatelessWidget {
   final VoidCallback onNotificationTap;
@@ -94,6 +95,21 @@ class CustomAppBar extends StatelessWidget {
                     ],
                   ),
                 ),
+                
+                // Profile Picture
+                RealtimeProfilePictureWidget(
+                  size: 40,
+                  onTap: () {
+                    // Navigate to profile screen
+                    Navigator.pushNamed(context, '/profile');
+                  },
+                  showEditIcon: false,
+                  isCircular: true,
+                  borderColor: AppTheme.primaryColor,
+                  borderWidth: 2,
+                ),
+                
+                const SizedBox(width: 12),
                 
                 // Notification Button
                 _buildNotificationButton(),

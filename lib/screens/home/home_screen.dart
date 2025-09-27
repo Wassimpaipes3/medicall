@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
+import '../../core/services/call_service.dart';
 import '../../widgets/common/custom_app_bar.dart';
 import '../../widgets/top_doctors_section.dart';
-import '../../widgets/navigation/modern_navigation_bar.dart';
-import '../../services/notification_service.dart';
 import '../../controllers/navigation_controller.dart';
 import '../../data/services/appointment_storage.dart';
-import '../chat/chat_screen.dart';
-import '../chat/provider_chat_screen.dart';
-import '../appointments/appointment_screen.dart';
+import '../../widgets/chat/chat_navigation_helper.dart';
+import '../../widgets/booking/ServiceSelectionPage.dart';
+import '../../widgets/booking/LocationSelectionPage.dart';
+import '../../widgets/booking/ProviderTrackingScreen.dart';
 import '../doctors/all_doctors_screen.dart';
 import '../notifications/notifications_screen.dart';
+import '../patient/patient_request_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -34,11 +35,9 @@ class _HomeScreenState extends State<HomeScreen>
   late Animation<double> _staggerAnimation;
   
   // State Variables
-  int _selectedBottomIndex = 0;
   final PageController _pageController = PageController();
   
   // Services
-  final NotificationService _notificationService = NotificationService();
   final NavigationController _navController = NavigationController();
   
   // Dynamic Stats
@@ -56,6 +55,11 @@ class _HomeScreenState extends State<HomeScreen>
       'available': true,
       'consultationFee': 150,
       'reviews': 2847,
+      'location': 'Algiers',
+      'address': 'Algiers Medical Center, Algiers, Algeria',
+      'latitude': 36.7538,
+      'longitude': 3.0588,
+      'phone': '+213-21-123456',
     },
     {
       'id': 'dr_ahmed',
@@ -67,6 +71,11 @@ class _HomeScreenState extends State<HomeScreen>
       'available': true,
       'consultationFee': 200,
       'reviews': 1923,
+      'location': 'Oran',
+      'address': 'Oran Neurology Center, Oran, Algeria',
+      'latitude': 35.6976,
+      'longitude': -0.6187,
+      'phone': '+213-41-234567',
     },
     {
       'id': 'dr_maria',
@@ -78,6 +87,11 @@ class _HomeScreenState extends State<HomeScreen>
       'available': false,
       'consultationFee': 120,
       'reviews': 3156,
+      'location': 'Constantine',
+      'address': 'Constantine Children Hospital, Constantine, Algeria',
+      'latitude': 36.3650,
+      'longitude': 6.6147,
+      'phone': '+213-31-345678',
     },
     {
       'id': 'dr_james',
@@ -89,6 +103,11 @@ class _HomeScreenState extends State<HomeScreen>
       'available': true,
       'consultationFee': 180,
       'reviews': 2234,
+      'location': 'Annaba',
+      'address': 'Annaba Orthopedic Clinic, Annaba, Algeria',
+      'latitude': 36.9000,
+      'longitude': 7.7667,
+      'phone': '+213-38-456789',
     },
   ];
 
@@ -108,9 +127,6 @@ class _HomeScreenState extends State<HomeScreen>
     // Reset navigation state when home screen is initialized
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _navController.setCurrentIndex(0); // Set home as active
-      setState(() {
-        _selectedBottomIndex = 0;
-      });
     });
   }
 
@@ -125,10 +141,6 @@ class _HomeScreenState extends State<HomeScreen>
   
   void _onNavigationStateChanged() {
     if (mounted) {
-      setState(() {
-        _selectedBottomIndex = _navController.currentIndex;
-      });
-      
       // Refresh appointment count when home tab is selected
       if (_navController.currentIndex == 0) {
         _loadAppointmentCount();
@@ -214,63 +226,6 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  void _onBottomNavTapped(int index) {
-    setState(() {
-      _selectedBottomIndex = index;
-    });
-    
-    // Add haptic feedback
-    HapticFeedback.lightImpact();
-    
-    // Update navigation controller
-    _navController.setCurrentIndex(index);
-    
-    // Navigate to appropriate screen
-    switch (index) {
-      case 0:
-        // Already on home, do nothing - just update the selected index
-        break;
-      case 1:
-        // Navigate to Chat
-        Navigator.push(
-          context,
-          _createRoute(const ChatScreen()),
-        );
-        break;
-      case 2:
-        // Navigate to Schedule (Appointments)
-        Navigator.push(
-          context,
-          _createRoute(const AppointmentScreen()),
-        );
-        break;
-      case 3:
-        // Navigate to Profile
-        _navController.navigateToProfile(context);
-        break;
-    }
-  }
-
-  Route _createRoute(Widget destination) {
-    return PageRouteBuilder(
-      pageBuilder: (context, animation, secondaryAnimation) => destination,
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        const begin = Offset(1.0, 0.0);
-        const end = Offset.zero;
-        const curve = Curves.ease;
-
-        var tween = Tween(begin: begin, end: end).chain(
-          CurveTween(curve: curve),
-        );
-
-        return SlideTransition(
-          position: animation.drive(tween),
-          child: child,
-        );
-      },
-    );
-  }
-
   void _navigateToAllDoctors() {
     Navigator.push(
       context,
@@ -290,34 +245,92 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _bookDoctor(Map<String, dynamic> doctor) {
-    _navigateToBookingFlow(); // Use the new healthcare booking system
+    // Navigate directly to location selection since doctor is already chosen
+    _navigateDirectToLocation(doctor);
   }
 
   void _chatWithDoctor(Map<String, dynamic> doctor) {
-    Navigator.push(
-      context,
+    // Use ChatNavigationHelper to navigate to the same chat interface as Messages tab
+    ChatNavigationHelper.navigateToPatientChat(
+      context: context,
+      doctorInfo: doctor,
+    );
+  }
+
+  void _callDoctor(Map<String, dynamic> doctor) {
+    final phoneNumber = doctor['phone']?.toString() ?? '';
+    if (phoneNumber.isNotEmpty) {
+      CallService.makeCall(
+        phoneNumber,
+        context: context,
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Phone number not available for this doctor'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+  }
+
+  void _navigateDirectToLocation(Map<String, dynamic> doctor) {
+    // Convert doctor specialty to ServiceType and Specialty
+    ServiceType serviceType = ServiceType.doctor; // Since we're booking a doctor
+    
+    // Map doctor specialties to the appropriate Specialty enum
+    Specialty specialty = _mapDoctorSpecialtyToEnum(doctor['specialty']);
+    
+    // Create LocationData based on doctor's location
+    LocationData doctorLocation = LocationData(
+      name: doctor['location'] ?? 'Doctor Location',
+      address: doctor['address'] ?? '${doctor['location']}, Algeria',
+      latitude: doctor['latitude'] ?? 36.7538, // Default to Algiers if not provided
+      longitude: doctor['longitude'] ?? 3.0588, // Default to Algiers if not provided
+    );
+    
+    // Generate a temporary appointment ID for tracking
+    String appointmentId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    
+    // Navigate directly to tracking screen with the selected doctor
+    Navigator.of(context).push(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => 
-            ProviderChatScreen(
-              providerId: doctor['id'] ?? 'unknown',
-              providerName: doctor['name'] ?? 'Doctor',
-              specialty: doctor['specialty'],
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            ProviderTrackingScreen(
+              selectedService: serviceType,
+              selectedSpecialty: specialty,
+              selectedLocation: doctorLocation,
+              appointmentId: appointmentId,
+              preSelectedDoctor: doctor,
             ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1.0, 0.0),
-              end: Offset.zero,
-            ).animate(CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeInOut,
-            )),
-            child: child,
+          const begin = Offset(1.0, 0.0);
+          const end = Offset.zero;
+          const curve = Curves.easeInOutCubic;
+          var tween = Tween(begin: begin, end: end).chain(
+            CurveTween(curve: curve),
           );
+          var offsetAnimation = animation.drive(tween);
+          return SlideTransition(position: offsetAnimation, child: child);
         },
-        transitionDuration: const Duration(milliseconds: 300),
       ),
     );
+  }
+
+  Specialty _mapDoctorSpecialtyToEnum(String specialty) {
+    // Map the doctor's specialty string to the Specialty enum
+    switch (specialty.toLowerCase()) {
+      case 'cardiologist':
+        return Specialty.cardiology;
+      case 'neurologist':
+        return Specialty.neurology;
+      case 'pediatrician':
+        return Specialty.pediatrics;
+      case 'orthopedic':
+        return Specialty.orthopedics;
+      default:
+        return Specialty.generalMedicine; // Default fallback
+    }
   }
 
   @override
@@ -372,6 +385,7 @@ class _HomeScreenState extends State<HomeScreen>
                       onViewAll: _navigateToAllDoctors,
                       onBookDoctor: _bookDoctor,
                       onChatDoctor: _chatWithDoctor,
+                      onCallDoctor: _callDoctor,
                       staggerAnimation: _staggerAnimation,
                     ),
                     
@@ -392,13 +406,6 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ],
         ),
-      ),
-      
-      // Modern Bottom Navigation Bar
-      bottomNavigationBar: ModernNavigationBar(
-        currentIndex: _selectedBottomIndex,
-        onTap: _onBottomNavTapped,
-        notificationCount: _notificationService.unreadCount,
       ),
     );
   }
@@ -753,6 +760,49 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          // Test Notification Button
+          SizedBox(
+            width: double.infinity,
+            child: GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const PatientRequestScreen(),
+                ),
+              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.notifications_active,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Test Notification System',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ],
       ),
