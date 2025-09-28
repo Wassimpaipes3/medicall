@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../services/role_redirect_service.dart';
-import '../services/real_time_role_service.dart';
+import '../../services/role_redirect_service.dart';
+import '../../services/real_time_role_service.dart';
 
 /// Debug screen to test role changes and document creation
 class RoleDebugScreen extends StatefulWidget {

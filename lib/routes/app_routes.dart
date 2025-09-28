@@ -25,6 +25,7 @@ class AppRoutes {
   
   // Test Routes
   static const firebaseTest = '/firebase-test';
+  static const providerAuthTest = '/provider-auth-test';
   
   // Provider Routes
   static const providerLogin = '/provider-login';

@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../models/provider/provider_model.dart';
 import '../../routes/app_routes.dart';
 import '../../services/provider/provider_service.dart';
+import '../../services/provider_auth_service.dart';
 import '../../widgets/provider/provider_navigation_bar.dart';
 import '../../widgets/provider/availability_toggle.dart';
 import '../../utils/responsive_button_layout.dart';
@@ -29,6 +30,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen>
   File? _profileImage;
   final ImagePicker _picker = ImagePicker();
   ProviderUser? _currentProvider;
+  ProviderProfile? _currentProviderProfile; // New profile from professionals collection
   bool _isLoading = true;
   int _selectedIndex = 3; // Profile tab
 
@@ -146,15 +148,29 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen>
 
   Future<void> _loadProviderData() async {
     try {
+      // Load provider profile from professionals collection
+      final providerProfile = await ProviderAuthService.getCurrentProviderProfile();
+      
+      if (providerProfile == null) {
+        // User is not a provider, redirect to login
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/provider-login');
+        }
+        return;
+      }
+      
+      // Load legacy provider data for compatibility
       final provider = await _providerService.getCurrentProvider();
       
       if (mounted) {
         setState(() {
           _currentProvider = provider;
+          _currentProviderProfile = providerProfile;
           _isLoading = false;
         });
       }
     } catch (e) {
+      print('❌ Error loading provider data: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -339,7 +355,7 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen>
             
             // Provider Info
             Text(
-              _currentProvider?.fullName ?? 'Dr. Healthcare Provider',
+              'Dr. ${_currentProviderProfile?.fullName ?? _currentProvider?.fullName ?? "Healthcare Provider"}',
               style: const TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -347,6 +363,33 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen>
               ),
               textAlign: TextAlign.center,
             ),
+            
+            const SizedBox(height: 4),
+            
+            // Email
+            if (_currentProviderProfile?.email.isNotEmpty == true)
+              Text(
+                _currentProviderProfile!.email,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.white70,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            
+            const SizedBox(height: 4),
+            
+            // Specialization
+            if (_currentProviderProfile?.displaySpeciality.isNotEmpty == true)
+              Text(
+                _currentProviderProfile!.displaySpeciality.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.white60,
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+              ),
             
             const SizedBox(height: 8),
             

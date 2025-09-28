@@ -4,10 +4,15 @@ import 'dart:async';
 import '../../core/theme.dart';
 import '../../models/provider/provider_model.dart';
 import '../../services/provider/provider_service.dart';
+import '../../services/provider_auth_service.dart' as ProviderAuth;
+import '../../services/provider_dashboard_service.dart' as DashboardService;
 import '../../widgets/provider/provider_navigation_bar.dart';
 import '../../widgets/provider/availability_toggle.dart';
 import '../../routes/app_routes.dart';
 import '../../utils/responsive_button_layout.dart';
+import 'earnings_analytics_screen.dart';
+import 'appointments_analytics_screen.dart';
+import 'ratings_analytics_screen.dart';
 
 class ProviderDashboardScreen extends StatefulWidget {
   const ProviderDashboardScreen({super.key});
@@ -32,6 +37,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
   late Animation<double> _pulseAnimation;
 
   ProviderUser? _currentProvider;
+  ProviderAuth.ProviderProfile? _currentProviderProfile; // New profile from professionals collection
   ProviderStatus _currentStatus = ProviderStatus.offline;
   List<AppointmentRequest> _pendingRequests = [];
   
@@ -41,9 +47,8 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
   Timer? _statusTimer;
   
   // Dashboard stats
-  int _todayEarnings = 0;
-  int _completedAppointments = 0;
-  int _averageRating = 0;
+  DashboardService.DashboardStats? _dashboardStats;
+  bool _isLoadingStats = true;
 
   @override
   void initState() {
@@ -136,14 +141,53 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     }
   }
 
+  void _navigateToAnalytics(String type) {
+    Widget screen;
+    
+    switch (type) {
+      case 'earnings':
+        screen = const EarningsAnalyticsScreen();
+        break;
+      case 'appointments':
+        screen = const AppointmentsAnalyticsScreen();
+        break;
+      case 'ratings':
+        screen = const RatingsAnalyticsScreen();
+        break;
+      default:
+        return; // Invalid type, don't navigate
+    }
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => screen),
+    );
+  }
+
   Future<void> _loadProviderData() async {
     print('DEBUG: _loadProviderData called');
     try {
+      // Load provider profile from professionals collection
+      final providerProfile = await ProviderAuth.ProviderAuthService.getCurrentProviderProfile();
+      
+      if (providerProfile == null) {
+        print('DEBUG: No provider profile found or user is not a provider');
+        // Redirect to login if not a valid provider
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/provider-login');
+        }
+        return;
+      }
+      
+      print('DEBUG: Provider profile loaded: ${providerProfile.fullName}');
+      print('DEBUG: Specialization: ${providerProfile.specialite}');
+      
+      // Load legacy provider service data for compatibility
       var provider = await _providerService.getCurrentProvider();
       
-      // If no provider is logged in, auto-login for testing
+      // If no legacy provider data, try auto-login for testing
       if (provider == null) {
-        print('DEBUG: No provider found, auto-logging in for testing');
+        print('DEBUG: No legacy provider found, auto-logging in for testing');
         final loginSuccess = await _providerService.loginProvider('test@provider.com', 'password');
         if (loginSuccess) {
           provider = await _providerService.getCurrentProvider();
@@ -153,21 +197,20 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
       
       final requests = await _providerService.getPendingRequests();
       
-      print('DEBUG: Provider loaded: $provider');
+      print('DEBUG: Legacy provider loaded: $provider');
       print('DEBUG: Provider status: ${provider?.currentStatus}');
       
       if (mounted) {
         setState(() {
           _currentProvider = provider;
+          _currentProviderProfile = providerProfile; // Set the new profile
           _currentStatus = provider?.currentStatus ?? ProviderStatus.offline;
           _pendingRequests = requests;
           _isLoading = false;
-          
-          // Mock stats for demo
-          _todayEarnings = 250 + (DateTime.now().hour * 15);
-          _completedAppointments = 8 + (DateTime.now().hour ~/ 2);
-          _averageRating = 47 + (DateTime.now().minute % 8);
         });
+        
+        // Load real dashboard statistics
+        await _loadDashboardStats();
         
         print('DEBUG: State updated. Current status: $_currentStatus');
       }
@@ -176,6 +219,36 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
       if (mounted) {
         setState(() {
           _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadDashboardStats() async {
+    try {
+      setState(() => _isLoadingStats = true);
+      
+      print('📊 Loading real dashboard statistics...');
+      final stats = await DashboardService.ProviderDashboardService.getDashboardStats();
+      
+      if (mounted) {
+        setState(() {
+          _dashboardStats = stats;
+          _isLoadingStats = false;
+        });
+        print('✅ Dashboard stats loaded: ${stats.toString()}');
+      }
+    } catch (e) {
+      print('❌ Error loading dashboard stats: $e');
+      if (mounted) {
+        setState(() {
+          _dashboardStats = const DashboardService.DashboardStats(
+            todayEarnings: 0,
+            completedTasks: 0,
+            pendingTasks: 0,
+            averageRating: 0.0,
+          );
+          _isLoadingStats = false;
         });
       }
     }
@@ -286,7 +359,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Dr. ${_currentProvider?.fullName ?? "Provider"}',
+                      'Dr. ${_currentProviderProfile?.fullName ?? _currentProvider?.fullName ?? "Provider"}',
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -294,13 +367,22 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                       ),
                     ),
                     Text(
-                      _currentProvider?.providerType.name.toUpperCase() ?? 'HEALTHCARE PROVIDER',
+                      _currentProviderProfile?.displaySpeciality.toUpperCase() ?? 
+                      _currentProvider?.providerType.name.toUpperCase() ?? 'PROFESSIONNEL DE SANTÉ',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey.shade600,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
+                    if (_currentProviderProfile?.email.isNotEmpty == true)
+                      Text(
+                        _currentProviderProfile!.email,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade500,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -367,51 +449,64 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         ),
         const SizedBox(height: 16),
         
-        Row(
-          children: [
-            Expanded(
-              child: _buildStatCard(
-                title: 'Earnings',
-                value: '\$$_todayEarnings',
-                icon: Icons.attach_money,
-                color: const Color(0xFF10B981),
-              ),
+        if (_isLoadingStats)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(40),
+              child: CircularProgressIndicator(),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildStatCard(
-                title: 'Completed',
-                value: '$_completedAppointments',
-                icon: Icons.check_circle_outline,
-                color: AppTheme.primaryColor,
+          )
+        else ...[
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  title: 'Earnings',
+                  value: '\$${_dashboardStats?.todayEarnings ?? 0}',
+                  icon: Icons.account_balance_wallet,
+                  color: const Color(0xFF43A047),
+                  onTap: () => _navigateToAnalytics('earnings'),
+                ),
               ),
-            ),
-          ],
-        ),
-        
-        const SizedBox(height: 12),
-        
-        Row(
-          children: [
-            Expanded(
-              child: _buildStatCard(
-                title: 'Rating',
-                value: '4.$_averageRating',
-                icon: Icons.star_outline,
-                color: const Color(0xFFF59E0B),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildStatCard(
+                  title: 'Completed',
+                  value: '${_dashboardStats?.completedTasks ?? 0}',
+                  icon: Icons.check_circle,
+                  color: const Color(0xFF1976D2),
+                  onTap: () => _navigateToAnalytics('appointments'),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildStatCard(
-                title: 'Pending',
-                value: '${_pendingRequests.length}',
-                icon: Icons.pending_outlined,
-                color: const Color(0xFFEF4444),
+            ],
+          ),
+          
+          const SizedBox(height: 16),
+          
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatCard(
+                  title: 'Rating',
+                  value: (_dashboardStats?.averageRating ?? 0.0).toStringAsFixed(1),
+                  icon: Icons.star,
+                  color: const Color(0xFFFF9800),
+                  onTap: () => _navigateToAnalytics('ratings'),
+                ),
               ),
-            ),
-          ],
-        ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _buildStatCard(
+                  title: 'Pending',
+                  value: '${_dashboardStats?.pendingTasks ?? 0}',
+                  icon: Icons.schedule,
+                  color: const Color(0xFFE53935),
+                  onTap: () => _navigateToAnalytics('appointments'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -421,86 +516,77 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     required String value,
     required IconData icon,
     required Color color,
+    VoidCallback? onTap,
   }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.white,
-            color.withOpacity(0.02),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
-        border: Border.all(
-          color: color.withOpacity(0.1),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      color.withOpacity(0.8),
-                      color,
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  icon,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              spreadRadius: 0,
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
+          ],
+          border: Border.all(
+            color: color.withOpacity(0.2),
+            width: 1.5,
           ),
-        ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    icon,
+                    color: Colors.white,
+                    size: 24,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
-import '../../services/provider/provider_service.dart';
+import '../../services/provider_auth_service.dart';
 import 'provider_dashboard_screen.dart';
 
 class ProviderLoginScreen extends StatefulWidget {
@@ -375,38 +375,54 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen>
     HapticFeedback.lightImpact();
 
     try {
-      final success = await ProviderService().loginProvider(
+      final result = await ProviderAuthService.providerLogin(
         _emailController.text.trim(),
         _passwordController.text,
       );
 
-      if (success && mounted) {
-        // Navigate to provider dashboard
-        Navigator.pushReplacement(
-          context,
-          PageRouteBuilder(
-            pageBuilder: (context, animation, secondaryAnimation) =>
-                const ProviderDashboardScreen(),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            transitionDuration: const Duration(milliseconds: 500),
-          ),
-        );
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Login failed. Please try again.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+      if (mounted) {
+        if (result['success'] == true) {
+          final profile = result['profile'] as ProviderProfile;
+          
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Bienvenue, Dr. ${profile.nom}!'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+
+          // Navigate to provider dashboard
+          Navigator.pushReplacement(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) =>
+                  const ProviderDashboardScreen(),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                return FadeTransition(opacity: animation, child: child);
+              },
+              transitionDuration: const Duration(milliseconds: 500),
+            ),
+          );
+        } else {
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? 'Erreur de connexion'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Text('Erreur: $e'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
           ),
         );
       }

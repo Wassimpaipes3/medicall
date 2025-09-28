@@ -16,6 +16,7 @@ import 'package:firstv/screens/profile/enhanced_profile_screen.dart';
 import 'package:firstv/screens/chat/provider_chat_screen.dart';
 import 'package:firstv/screens/booking/live_tracking_screen.dart';
 import 'package:firstv/services/notification_service.dart';
+import 'package:firstv/middleware/route_guard.dart';
 // Provider Screens
 import 'package:firstv/screens/provider/provider_dashboard_screen.dart';
 import 'package:firstv/screens/provider/provider_login_screen.dart';
@@ -34,7 +35,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:firstv/services/real_time_role_service.dart';
 import 'package:firstv/screens/admin/admin_dashboard_screen.dart';
-import 'package:firstv/screens/debug/role_debug_screen.dart';
+// import 'package:firstv/screens/debug/role_debug_screen.dart';
+// import 'package:firstv/screens/test/provider_auth_test_screen.dart';
 
 // Global navigator key for app-wide navigation
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -98,12 +100,24 @@ class MyApp extends StatelessWidget {
         AppRoutes.login: (context) => const LoginScreen(),
         AppRoutes.signup: (context) => const SignUpScreen(),
         AppRoutes.forgetPassword: (context) => const ForgetPasswordScreen(),
-        AppRoutes.home: (context) => const PatientNavigationWrapper(),
-        AppRoutes.patientNavigation: (context) => const PatientNavigationWrapper(),
-        AppRoutes.chatPage: (context) => const ChatScreen(),
-        AppRoutes.schedule: (context) => const AppointmentScreen(),
-        AppRoutes.doctors: (context) => const AllDoctorsScreen(),
-        AppRoutes.notifications: (context) => const NotificationsScreen(),
+        AppRoutes.home: (context) => RouteGuard.patientRouteGuard(
+          child: const PatientNavigationWrapper(),
+        ),
+        AppRoutes.patientNavigation: (context) => RouteGuard.patientRouteGuard(
+          child: const PatientNavigationWrapper(),
+        ),
+        AppRoutes.chatPage: (context) => RouteGuard.patientRouteGuard(
+          child: const ChatScreen(),
+        ),
+        AppRoutes.schedule: (context) => RouteGuard.patientRouteGuard(
+          child: const AppointmentScreen(),
+        ),
+        AppRoutes.doctors: (context) => RouteGuard.patientRouteGuard(
+          child: const AllDoctorsScreen(),
+        ),
+        AppRoutes.notifications: (context) => RouteGuard.patientRouteGuard(
+          child: const NotificationsScreen(),
+        ),
         AppRoutes.serviceSelection: (context) => const ServiceSelectionPage(),
         AppRoutes.appointments: (context) => const AppointmentsPage(),
   AppRoutes.liveTracking: (context) => const LiveTrackingScreen(),
@@ -112,14 +126,26 @@ class MyApp extends StatelessWidget {
           providerId: 'provider_1',
           providerName: 'Dr. Sarah Johnson',
         ),
-        // Provider Routes
-        AppRoutes.providerDashboard: (context) => const ProviderDashboardScreen(),
-        AppRoutes.providerLogin: (context) => const ProviderLoginScreen(),
-        AppRoutes.providerNavigation: (context) => const ProviderNavigationScreen(),
-        AppRoutes.providerProfile: (context) => const ProviderEnhanced.EnhancedProfileScreen(),
-        AppRoutes.providerMessages: (context) => const ProviderMessagesScreen(),
-        AppRoutes.providerEarnings: (context) => const ProviderEarningsScreen(),
-        AppRoutes.providerAppointments: (context) => const AppointmentManagementScreen(),
+        // Provider Routes (with route guard)
+        AppRoutes.providerDashboard: (context) => RouteGuard.providerRouteGuard(
+          child: const ProviderDashboardScreen(),
+        ),
+        AppRoutes.providerLogin: (context) => const ProviderLoginScreen(), // Login screen doesn't need guard
+        AppRoutes.providerNavigation: (context) => RouteGuard.providerRouteGuard(
+          child: const ProviderNavigationScreen(),
+        ),
+        AppRoutes.providerProfile: (context) => RouteGuard.providerRouteGuard(
+          child: const ProviderEnhanced.EnhancedProfileScreen(),
+        ),
+        AppRoutes.providerMessages: (context) => RouteGuard.providerRouteGuard(
+          child: const ProviderMessagesScreen(),
+        ),
+        AppRoutes.providerEarnings: (context) => RouteGuard.providerRouteGuard(
+          child: const ProviderEarningsScreen(),
+        ),
+        AppRoutes.providerAppointments: (context) => RouteGuard.providerRouteGuard(
+          child: const AppointmentManagementScreen(),
+        ),
         // Enhanced Provider Routes (keeping for compatibility)
         AppRoutes.enhancedProfile: (context) => const ProviderEnhanced.EnhancedProfileScreen(),
         AppRoutes.enhancedMessages: (context) => const EnhancedMessagesScreen(),
@@ -127,8 +153,9 @@ class MyApp extends StatelessWidget {
         AppRoutes.enhancedAppointmentManagement: (context) => const EnhancedAppointmentManagementScreen(),
         // Admin Routes
         '/admin-dashboard': (context) => const AdminDashboardScreen(),
-        // Debug Routes
-        '/role-debug': (context) => const RoleDebugScreen(),
+        // Debug Routes (temporarily disabled)
+        // '/role-debug': (context) => const RoleDebugScreen(),
+        // AppRoutes.providerAuthTest: (context) => const ProviderAuthTestScreen(),
       },
     );
   }
