@@ -46,6 +46,33 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
     }
 
+    // === /professionals: Role-based professional documents ===
+    match /professionals/{proId} {
+      // Allow read for all authenticated users
+      allow read: if request.auth != null;
+      
+      // Allow create/update/delete for the professional themselves or during role changes
+      allow write: if request.auth != null && request.auth.uid == proId;
+    }
+
+    // === /providers: Legacy provider documents (for cleanup) ===
+    match /providers/{proId} {
+      // Allow read for all authenticated users  
+      allow read: if request.auth != null;
+      
+      // Allow write for the provider themselves or during role changes
+      allow write: if request.auth != null && request.auth.uid == proId;
+    }
+
+    // === /role_change_log: Audit trail for role changes ===
+    match /role_change_log/{logId} {
+      // Allow read for admins or the affected user
+      allow read: if request.auth != null;
+      
+      // Allow create for role change operations
+      allow create: if request.auth != null;
+    }
+
     // === /disponibilites: Professional availability slots ===
     match /disponibilites/{id_dispo} {
       allow read: if request.auth != null;

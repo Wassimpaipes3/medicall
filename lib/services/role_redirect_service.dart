@@ -53,7 +53,7 @@ class RoleRedirectService {
   static Future<void> _cleanupOldRoleDocuments(String userId, String? currentRole) async {
     try {
       // Collections to check for cleanup
-      final collections = ['patients', 'providers'];
+      final collections = ['patients', 'providers', 'professionals'];
       
       for (String collection in collections) {
         // Skip the current role collection
@@ -83,7 +83,7 @@ class RoleRedirectService {
       case 'doctor':
       case 'docteur':
       case 'professional':
-        return collection == 'providers';
+        return collection == 'professionals';
       default:
         return false;
     }
@@ -111,18 +111,17 @@ class RoleRedirectService {
         case 'doctor':
         case 'docteur':
         case 'professional':
-          targetCollection = 'providers'; // Use existing providers collection
+          targetCollection = 'professionals'; // Use professionals collection as specified
           defaultData = {
+            'bio': 'Médecin spécialisé avec plusieurs années d\'expérience.',
+            'disponible': true,
             'id_user': userId,
             'idpro': 'doc_${userId.substring(0, 8)}', // Generate doctor ID
             'login': 'login_${userId.substring(0, 8)}',
             'profession': 'medecin',
-            'specialite': 'generaliste', // Default specialty
-            'service': 'consultation', // Default service
-            'bio': 'Médecin spécialisé avec plusieurs années d\'expérience.',
             'rating': '0.0',
-            'disponible': true,
-            'createdAt': FieldValue.serverTimestamp(),
+            'service': 'consultation',
+            'specialite': 'generaliste',
           };
           break;
         
@@ -135,9 +134,22 @@ class RoleRedirectService {
       final doc = await _firestore.collection(targetCollection).doc(userId).get();
       
       if (!doc.exists) {
-        debugPrint('Creating new document in $targetCollection collection');
+        debugPrint('🔧 Creating new document in $targetCollection collection');
+        debugPrint('📋 Document data to create: $defaultData');
         await _firestore.collection(targetCollection).doc(userId).set(defaultData);
-        debugPrint('Created new role document for $role');
+        debugPrint('✅ Created new role document for $role in $targetCollection');
+        
+        // Verify the document was created
+        final verifyDoc = await _firestore.collection(targetCollection).doc(userId).get();
+        if (verifyDoc.exists) {
+          debugPrint('✅ Document verification successful');
+          final verifyData = verifyDoc.data() as Map<String, dynamic>;
+          debugPrint('📄 Document fields: ${verifyData.keys.toList()}');
+        } else {
+          debugPrint('❌ Document verification failed - document not found');
+        }
+      } else {
+        debugPrint('📄 Document already exists in $targetCollection collection');
       }
     } catch (e) {
       debugPrint('Error ensuring role document: $e');
