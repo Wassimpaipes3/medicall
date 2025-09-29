@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'ServiceSelectionPage.dart';
 import 'LocationSelectionPage.dart';
 import 'ProviderTrackingScreen.dart';
 import '../../core/enhanced_theme.dart';
 import '../../data/services/healthcare_service_provider.dart';
 import '../../data/services/appointment_storage.dart';
+import '../../services/appointment_service.dart';
 
 enum PaymentMethod {
   cash,
@@ -722,6 +724,28 @@ class _PaymentPageState extends State<PaymentPage>
     ).trim();
   }
 
+  /// Convert specialty to service name for Firestore appointment
+  String _getServiceName(Specialty specialty) {
+    final specialtyName = _getSpecialtyName(specialty).toLowerCase();
+    
+    // Map common specialties to service names
+    if (specialtyName.contains('general') || specialtyName.contains('family')) {
+      return 'generalist';
+    } else if (specialtyName.contains('wound') || specialtyName.contains('care')) {
+      return 'wound care';
+    } else if (specialtyName.contains('emergency')) {
+      return 'emergency';
+    } else if (specialtyName.contains('nursing') || specialtyName.contains('nurse')) {
+      return 'nursing';
+    } else if (specialtyName.contains('therapy') || specialtyName.contains('physical')) {
+      return 'physical therapy';
+    } else if (specialtyName.contains('consultation')) {
+      return 'consultation';
+    } else {
+      return 'consultation'; // Default to consultation
+    }
+  }
+
   Future<void> _processPayment() async {
     if (_selectedPaymentMethod == null) return;
 
@@ -729,65 +753,119 @@ class _PaymentPageState extends State<PaymentPage>
       _isProcessing = true;
     });
 
-    // Simulate payment processing
-    await Future.delayed(const Duration(seconds: 2));
-
-    // Save appointment to schedule
-    final totalPrice = widget.basePrice + widget.travelFee + widget.serviceFee;
-    final appointmentId = DateTime.now().millisecondsSinceEpoch.toString(); // Generate unique ID
-    final appointmentData = {
-      'id': appointmentId,
-      'serviceType': widget.selectedService.toString(),
-      'specialty': widget.selectedSpecialty.toString(),
-      'locationName': widget.selectedLocation.name,
-      'locationAddress': widget.selectedLocation.address,
-      'appointmentTime': DateTime.now().add(const Duration(hours: 24)).toIso8601String(), // Schedule for next day
-      'totalPrice': totalPrice,
-      'paymentMethod': _getPaymentMethodText(),
-      'basePrice': widget.basePrice,
-      'travelFee': widget.travelFee,
-      'serviceFee': widget.serviceFee,
-      'status': 'scheduled', // Set initial status
-      'createdAt': DateTime.now().toIso8601String(),
-    };
-
     try {
-      print('DEBUG: Saving appointment with data: $appointmentData');
-      await AppointmentStorage.saveAppointment(appointmentData);
-      print('DEBUG: Appointment saved successfully');
+      // Simulate payment processing
+      await Future.delayed(const Duration(seconds: 2));
+
+      // Calculate total price
+      final totalPrice = widget.basePrice + widget.travelFee + widget.serviceFee;
+      
+      // Prepare appointment data for Firestore
+      final service = _getServiceName(widget.selectedSpecialty);
+      final type = 'instant'; // Can be 'instant' or 'scheduled' based on your logic
+      final patientAddress = widget.selectedLocation.address;
+      
+      // Create GeoPoint for patient location (using selected location coordinates)
+      final patientLocation = GeoPoint(
+        widget.selectedLocation.latitude,
+        widget.selectedLocation.longitude,
+      );
+      
+      print('💳 Payment successful! Creating appointment in Firestore...');
+      
+      // Create appointment in Firestore with your updated schema
+      // providerlocation will be null initially and set when provider accepts
+      final appointmentId = await AppointmentService.createAppointmentWithValidation(
+        service: service,
+        type: type,
+        patientAddress: patientAddress,
+        patientLocation: patientLocation,
+        prix: totalPrice,
+        paymentMethod: _getPaymentMethodText(),
+        serviceFee: widget.serviceFee,
+        notes: '', // Empty notes for now
+        // For instant appointments, these will be null
+        // For scheduled appointments, you would pass the actual dates
+        appointmentDate: type == 'scheduled' ? DateTime.now().add(const Duration(hours: 1)) : null,
+        endTime: type == 'scheduled' ? DateTime.now().add(const Duration(hours: 2)) : null,
+      );
+
+      print('✅ Firestore appointment created with ID: $appointmentId');
+
+      // Also save to local storage as backup (keep existing functionality)
+      final localAppointmentData = {
+        'id': appointmentId,  // Use Firestore ID for consistency
+        'serviceType': widget.selectedService.toString(),
+        'specialty': widget.selectedSpecialty.toString(),
+        'locationName': widget.selectedLocation.name,
+        'locationAddress': widget.selectedLocation.address,
+        'appointmentTime': DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
+        'totalPrice': totalPrice,
+        'paymentMethod': _getPaymentMethodText(),
+        'basePrice': widget.basePrice,
+        'travelFee': widget.travelFee,
+        'serviceFee': widget.serviceFee,
+        'status': 'pending', // Changed to pending to match Firestore
+        'createdAt': DateTime.now().toIso8601String(),
+      };
+
+      try {
+        await AppointmentStorage.saveAppointment(localAppointmentData);
+        print('✅ Local backup saved successfully');
+      } catch (e) {
+        print('⚠️ Local backup failed (non-critical): $e');
+        // Don't throw error here as Firestore save was successful
+      }
+
+      setState(() {
+        _isProcessing = false;
+      });
+
+      // Navigate to tracking screen after successful payment
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              ProviderTrackingScreen(
+                selectedService: widget.selectedService,
+                selectedSpecialty: widget.selectedSpecialty,
+                selectedLocation: widget.selectedLocation,
+                appointmentId: appointmentId,  // Pass Firestore appointment ID
+              ),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            const begin = Offset(1.0, 0.0);
+            const end = Offset.zero;
+            const curve = Curves.easeInOutCubic;
+            var tween = Tween(begin: begin, end: end).chain(
+              CurveTween(curve: curve),
+            );
+            var offsetAnimation = animation.drive(tween);
+            return SlideTransition(position: offsetAnimation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 500),
+        ),
+      );
+
     } catch (e) {
-      // Handle error if needed
-      print('DEBUG: Error saving appointment: $e');
-      print('Error saving appointment: $e');
+      setState(() {
+        _isProcessing = false;
+      });
+
+      print('❌ Error processing payment and creating appointment: $e');
+      
+      // Show error to user
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error creating appointment: ${e.toString()}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Retry',
+            textColor: Colors.white,
+            onPressed: _processPayment,
+          ),
+        ),
+      );
     }
-
-    setState(() {
-      _isProcessing = false;
-    });
-
-    // Navigate to tracking screen after successful payment
-    Navigator.of(context).pushReplacement(
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            ProviderTrackingScreen(
-              selectedService: widget.selectedService,
-              selectedSpecialty: widget.selectedSpecialty,
-              selectedLocation: widget.selectedLocation,
-              appointmentId: appointmentId,
-            ),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          const begin = Offset(1.0, 0.0);
-          const end = Offset.zero;
-          const curve = Curves.easeInOutCubic;
-          var tween = Tween(begin: begin, end: end).chain(
-            CurveTween(curve: curve),
-          );
-          var offsetAnimation = animation.drive(tween);
-          return SlideTransition(position: offsetAnimation, child: child);
-        },
-        transitionDuration: const Duration(milliseconds: 500),
-      ),
-    );
   }
 
   String _getPaymentMethodText() {

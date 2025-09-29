@@ -32,27 +32,19 @@ service cloud.firestore {
         && request.resource.data.notifications_non_lues is int;
     }
 
-    // === /professionnels: Doctors and nurses ===
-    match /professionnels/{proId} {
+    // === /professionals: Unified rules for professionals ===
+    match /professionals/{proId} {
       allow read: if request.auth != null;
 
       allow create: if request.auth != null
-        && request.auth.uid == proId
-        && request.resource.data.userId == proId
-        && request.resource.data.role in ['doctor', 'nurse'];
+        && (request.auth.uid == proId || request.resource.data.id_user == request.auth.uid)
+        && request.resource.data.profession in ['medecin', 'infirmier', 'doctor', 'nurse'];
 
-      allow update, delete: if request.auth != null
-        && request.auth.uid == proId
-        && resource.data.userId == request.auth.uid;
-    }
-
-    // === /professionals: Role-based professional documents ===
-    match /professionals/{proId} {
-      // Allow read for all authenticated users
-      allow read: if request.auth != null;
-      
-      // Allow create/update/delete for the professional themselves or during role changes
-      allow write: if request.auth != null && request.auth.uid == proId;
+      allow update: if request.auth != null
+        && (request.auth.uid == proId || resource.data.id_user == request.auth.uid);
+            
+      allow delete: if request.auth != null
+        && (request.auth.uid == proId || resource.data.id_user == request.auth.uid);
     }
 
     // === /providers: Legacy provider documents (for cleanup) ===
@@ -88,17 +80,19 @@ service cloud.firestore {
     // === /appointments: Appointment booking system ===
     match /appointments/{appId} {
       allow read: if request.auth != null &&
-        (resource.data.idpat == request.auth.uid || resource.data.idpro == request.auth.uid);
+        (resource.data.patientId == request.auth.uid || 
+         resource.data.professionnelId == request.auth.uid ||
+         resource.data.idpat == request.auth.uid || 
+         resource.data.idpro == request.auth.uid);
 
-      allow create: if request.auth != null
-        && request.resource.data.idpat == request.auth.uid
-        && exists(/databases/$(database)/documents/patients/$(request.resource.data.idpat))
-        && exists(/databases/$(database)/documents/professionnels/$(request.resource.data.idpro))
-        && request.resource.data.date >= currentDate();
+      allow create: if request.auth != null;
 
       allow update, delete: if request.auth != null
-        && (resource.data.idpat == request.auth.uid || resource.data.idpro == request.auth.uid)
-        && resource.data.etat == 'pending'; // Prevent editing confirmed appointments
+        && (resource.data.patientId == request.auth.uid || 
+            resource.data.professionnelId == request.auth.uid ||
+            resource.data.idpat == request.auth.uid || 
+            resource.data.idpro == request.auth.uid)
+        && resource.data.status == 'pending'; // Prevent editing confirmed appointments
     }
 
     // === /avis: Patient reviews for professionals ===

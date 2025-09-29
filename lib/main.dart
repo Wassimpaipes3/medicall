@@ -35,6 +35,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'package:firstv/services/real_time_role_service.dart';
 import 'package:firstv/screens/admin/admin_dashboard_screen.dart';
+
 // import 'package:firstv/screens/debug/role_debug_screen.dart';
 // import 'package:firstv/screens/test/provider_auth_test_screen.dart';
 
@@ -156,6 +157,7 @@ class MyApp extends StatelessWidget {
         // Debug Routes (temporarily disabled)
         // '/role-debug': (context) => const RoleDebugScreen(),
         // AppRoutes.providerAuthTest: (context) => const ProviderAuthTestScreen(),
+
       },
     );
   }

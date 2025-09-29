@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import '../../core/theme.dart';
 import '../../models/provider/provider_model.dart';
+import '../../services/provider_location_service.dart';
+
 import '../../services/provider/provider_service.dart';
 import '../../services/provider_auth_service.dart' as ProviderAuth;
 import '../../services/provider_dashboard_service.dart' as DashboardService;
@@ -56,6 +58,28 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     _initializeAnimations();
     _loadProviderData();
     _startStatusUpdates();
+    
+    // 🆕 NEW: Initialize location tracking if provider is already online
+    _initializeLocationTracking();
+  }
+
+  /// 🆕 NEW: Initialize location tracking based on current provider status
+  Future<void> _initializeLocationTracking() async {
+    try {
+      print('🔍 Checking if provider should be tracking location...');
+      
+      // Check if provider is already available in Firestore
+      final isAvailable = await ProviderLocationService.isProviderAvailable();
+      
+      if (isAvailable && _currentStatus == ProviderStatus.online) {
+        print('🚀 Provider is online - starting location tracking');
+        ProviderLocationService.startLocationUpdates();
+      } else {
+        print('📱 Provider is offline - location tracking not started');
+      }
+    } catch (e) {
+      print('❌ Error initializing location tracking: $e');
+    }
   }
 
   void _initializeAnimations() {
@@ -121,6 +145,10 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     _pulseController.dispose();
     _staggerController.dispose();
     _statusTimer?.cancel();
+    
+    // 🆕 NEW: Stop location tracking when screen is disposed
+    ProviderLocationService.dispose();
+    
     super.dispose();
   }
 
@@ -425,6 +453,9 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         children: [
           _buildStatsCards(),
           const SizedBox(height: 24),
+          
+
+          
           _buildActiveRequests(),
           const SizedBox(height: 24),
           _buildTodaySchedule(),
@@ -895,6 +926,10 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
             ),
           ],
         ),
+        
+        const SizedBox(height: 12),
+        
+        // (Removed debug Firestore button)
       ],
     );
   }
@@ -1007,8 +1042,21 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
       // Call backend service
       await _providerService.updateProviderStatus(newStatus);
       
+      // 🆕 NEW: Start/stop location tracking based on status
       if (newStatus == ProviderStatus.online) {
+        print('🚀 Provider going online - starting location tracking');
         _loadProviderData(); // Refresh data when going online
+        
+                // Start real-time location tracking
+        await ProviderLocationService.setProviderAvailability(true);
+        ProviderLocationService.startLocationUpdates(); // Immediately start sharing location
+        print('📍 Location tracking started successfully');
+      } else {
+        print('🛑 Provider going offline - stopping location tracking');
+        
+        // Stop real-time location tracking
+        await ProviderLocationService.setProviderAvailability(false);
+        print('📍 Location tracking stopped successfully');
       }
 
       print('DEBUG: Status change successful');
@@ -1029,8 +1077,8 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                 Expanded(
                   child: Text(
                     newStatus == ProviderStatus.online 
-                        ? 'You are now online and ready to accept appointments'
-                        : 'You are now offline',
+                        ? 'You are now online and sharing location!'
+                        : 'You are now offline - location tracking stopped',
                     style: const TextStyle(fontWeight: FontWeight.w500),
                   ),
                 ),
