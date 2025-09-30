@@ -28,6 +28,9 @@ import 'package:firstv/screens/provider/enhanced_profile_screen.dart' as Provide
 import 'package:firstv/screens/provider/enhanced_messages_screen.dart';
 import 'package:firstv/screens/provider/enhanced_earnings_screen.dart';
 import 'package:firstv/screens/provider/enhanced_appointment_management_screen.dart';
+import 'package:firstv/screens/booking/select_provider_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firstv/screens/provider/provider_requests_screen.dart';
 // Booking Flow Imports
 import 'package:firstv/widgets/booking/ServiceSelectionPage.dart';
 import 'package:firstv/widgets/booking/AppointmentsPage.dart';
@@ -122,6 +125,27 @@ class MyApp extends StatelessWidget {
         AppRoutes.serviceSelection: (context) => const ServiceSelectionPage(),
         AppRoutes.appointments: (context) => const AppointmentsPage(),
   AppRoutes.liveTracking: (context) => const LiveTrackingScreen(),
+        AppRoutes.selectProvider: (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          return SelectProviderScreen(
+            service: args?['service'] ?? 'consultation',
+            specialty: args?['specialty'],
+            prix: (args?['prix'] ?? 0).toDouble(),
+            paymentMethod: args?['paymentMethod'] ?? 'Cash',
+            patientLocation: args?['patientLocation'] ?? const GeoPoint(0,0),
+          );
+        },
+        AppRoutes.waitingAcceptance: (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final requestId = args?['requestId'] as String?;
+          return WaitingForAcceptanceScreen(requestId: requestId ?? '');
+        },
+        AppRoutes.tracking: (context) {
+          // Existing tracking screen expects appointmentId via arguments
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final appointmentId = args?['appointmentId'] as String?;
+          return LiveTrackingScreen(appointmentId: appointmentId); // adjust constructor if needed
+        },
         '/profile': (context) => const EnhancedProfileScreen(),
         '/provider-chat': (context) => const ProviderChatScreen(
           providerId: 'provider_1',
@@ -146,6 +170,9 @@ class MyApp extends StatelessWidget {
         ),
         AppRoutes.providerAppointments: (context) => RouteGuard.providerRouteGuard(
           child: const AppointmentManagementScreen(),
+        ),
+        AppRoutes.providerRequests: (context) => RouteGuard.providerRouteGuard(
+          child: const ProviderRequestsScreen(),
         ),
         // Enhanced Provider Routes (keeping for compatibility)
         AppRoutes.enhancedProfile: (context) => const ProviderEnhanced.EnhancedProfileScreen(),

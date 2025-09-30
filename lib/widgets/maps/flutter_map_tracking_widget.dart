@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../data/models/location_models.dart';
 import '../../data/services/enhanced_provider_tracking_service.dart';
 import '../../data/services/location_service.dart';
@@ -51,12 +53,27 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
   List<HealthcareProvider> _nearbyProviders = [];
   HealthcareProvider? _selectedProvider;
   List<LatLng> _routePoints = [];
+  
+  // Appointment tracking state
+  LatLng? _patientLocation;
+  LatLng? _providerLocation;
+  String? _currentUserRole; // 'patient' or 'provider'
+  String? _patientId;
+  String? _providerId;
+  
+  // Route stability
+  LatLng? _lastRoutePatientLocation;
+  LatLng? _lastRouteProviderLocation;
+  bool _isRouteStable = false;
+  Timer? _routeStabilityTimer;
 
   // Subscriptions
   StreamSubscription<Position>? _locationSubscription;
   StreamSubscription<List<HealthcareProvider>>? _providersSubscription;
   StreamSubscription<HealthcareProvider>? _providerLocationSubscription;
+  StreamSubscription<DocumentSnapshot>? _appointmentSubscription;
   Timer? _refreshTimer;
+  Timer? _locationUpdateTimer;
 
   // Animation controllers
   late AnimationController _markerAnimationController;
@@ -95,17 +112,22 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
 
   void _initializeMap() async {
     try {
+      print('🗺️ [FlutterMapTracking] Initializing with appointmentId: ${widget.appointmentId}');
+      
       // Get current location
       await _getCurrentLocation();
       
       // Start listening to location updates
       _startLocationTracking();
       
-      if (widget.showNearbyProviders) {
-        // Get nearby providers
+      if (widget.appointmentId != null) {
+        // Appointment-specific tracking mode
+        print('📍 [FlutterMapTracking] Starting appointment tracking mode');
+        _startAppointmentTracking();
+      } else if (widget.showNearbyProviders) {
+        // Provider discovery mode
+        print('🔍 [FlutterMapTracking] Starting provider discovery mode');
         await _getNearbyProviders();
-        
-        // Start provider tracking
         _startProviderTracking();
       }
     } catch (e) {
@@ -320,6 +342,298 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
     return closestProvider;
   }
 
+  /// Start appointment-specific tracking for both patient and provider
+  void _startAppointmentTracking() async {
+    if (widget.appointmentId == null) return;
+    
+    print('📱 [FlutterMapTracking] Starting appointment tracking for: ${widget.appointmentId}');
+    
+    try {
+      // Get current user role and appointment details
+      await _loadAppointmentDetails();
+      
+      // Start role-specific tracking behavior
+      if (_currentUserRole == 'patient') {
+        print('👤 [Patient View] Starting patient tracking mode');
+        _startPatientTrackingMode();
+      } else if (_currentUserRole == 'provider') {
+        print('🩺 [Provider View] Starting provider tracking mode');
+        _startProviderTrackingMode();
+      }
+      
+      // Start listening to appointment updates (real-time location sync)
+      _subscribeToAppointmentUpdates();
+      
+    } catch (e) {
+      print('❌ [FlutterMapTracking] Error starting appointment tracking: $e');
+    }
+  }
+
+  /// Load appointment details from Firestore
+  Future<void> _loadAppointmentDetails() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final appointmentDoc = await FirebaseFirestore.instance
+        .collection('appointments')
+        .doc(widget.appointmentId)
+        .get();
+
+    if (!appointmentDoc.exists) {
+      print('❌ Appointment not found: ${widget.appointmentId}');
+      return;
+    }
+
+    final data = appointmentDoc.data()!;
+    _patientId = data['idpat'] ?? data['patientId'];
+    _providerId = data['idpro'] ?? data['professionnelId'];
+    
+    // Determine current user role
+    if (user.uid == _patientId) {
+      _currentUserRole = 'patient';
+      print('👤 [FlutterMapTracking] User is patient');
+    } else if (user.uid == _providerId) {
+      _currentUserRole = 'provider'; 
+      print('🩺 [FlutterMapTracking] User is provider');
+    } else {
+      print('❌ [FlutterMapTracking] User not found in appointment');
+    }
+
+    // Load existing locations if available
+    final patientLoc = data['patientlocation'] as GeoPoint?;
+    final providerLoc = data['providerlocation'] as GeoPoint?;
+    
+    if (patientLoc != null) {
+      _patientLocation = LatLng(patientLoc.latitude, patientLoc.longitude);
+    }
+    if (providerLoc != null) {
+      _providerLocation = LatLng(providerLoc.latitude, providerLoc.longitude);
+    }
+
+    setState(() {}); // Refresh markers
+  }
+
+  /// Patient tracking mode: Track own location, watch provider location
+  void _startPatientTrackingMode() {
+    print('👤 [Patient] Patient stays put, watching provider move');
+    
+    // Patient updates their location once initially, then stays fixed
+    _updatePatientLocationInFirestore();
+    
+    // Patient focuses on tracking the provider's movement
+    // No continuous location updates needed for patient
+  }
+
+  /// Provider tracking mode: Continuously update own location to reach patient
+  void _startProviderTrackingMode() {
+    print('🩺 [Provider] Provider navigates to patient location');
+    
+    // Provider continuously updates their location
+    _startProviderLocationUpdates();
+    
+    // Focus map on patient location initially (destination)
+    if (_patientLocation != null) {
+      _mapController.move(_patientLocation!, 15.0);
+      print('🎯 [Provider] Map focused on patient location (destination)');
+    }
+  }
+
+  /// Update patient location once in Firestore (patient stays fixed)
+  Future<void> _updatePatientLocationInFirestore() async {
+    if (_currentLocation == null) return;
+    
+    final geoPoint = GeoPoint(_currentLocation!.latitude, _currentLocation!.longitude);
+    
+    try {
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(widget.appointmentId)
+          .update({
+            'patientlocation': geoPoint,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+      
+      print('📍 [Patient] Fixed location set: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
+    } catch (e) {
+      print('❌ [Patient] Failed to set fixed location: $e');
+    }
+  }
+
+  /// Continuously update provider location (provider moves to patient)
+  void _startProviderLocationUpdates() {
+    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (_currentLocation != null) {
+        _updateProviderLocationInFirestore();
+      }
+    });
+  }
+
+  /// Update provider location in Firestore
+  Future<void> _updateProviderLocationInFirestore() async {
+    if (_currentLocation == null) return;
+    
+    final geoPoint = GeoPoint(_currentLocation!.latitude, _currentLocation!.longitude);
+    
+    try {
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(widget.appointmentId)
+          .update({
+            'providerlocation': geoPoint,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+      
+      print('🚶 [Provider] Location updated: ${_currentLocation!.latitude}, ${_currentLocation!.longitude}');
+    } catch (e) {
+      print('❌ [Provider] Failed to update location: $e');
+    }
+  }
+
+  /// Subscribe to real-time appointment location updates  
+  void _subscribeToAppointmentUpdates() {
+    _appointmentSubscription = FirebaseFirestore.instance
+        .collection('appointments')
+        .doc(widget.appointmentId)
+        .snapshots()
+        .listen((snapshot) {
+      if (!snapshot.exists) return;
+      
+      final data = snapshot.data()!;
+      
+      // Update patient location
+      final patientLoc = data['patientlocation'] as GeoPoint?;
+      if (patientLoc != null) {
+        final newPatientLoc = LatLng(patientLoc.latitude, patientLoc.longitude);
+        if (_patientLocation != newPatientLoc) {
+          setState(() => _patientLocation = newPatientLoc);
+          
+          if (_currentUserRole == 'provider') {
+            print('🎯 [Provider View] Patient location received: ${patientLoc.latitude}, ${patientLoc.longitude}');
+          }
+        }
+      }
+      
+      // Update provider location  
+      final providerLoc = data['providerlocation'] as GeoPoint?;
+      if (providerLoc != null) {
+        final newProviderLoc = LatLng(providerLoc.latitude, providerLoc.longitude);
+        if (_providerLocation != newProviderLoc) {
+          setState(() => _providerLocation = newProviderLoc);
+          
+          if (_currentUserRole == 'patient') {
+            print('📍 [Patient View] Provider location updated: ${providerLoc.latitude}, ${providerLoc.longitude}');
+          }
+        }
+      }
+      
+      // Update route and view based on role
+      _updateRoleBasedView();
+    });
+  }
+
+
+
+  /// Update view and route based on user role
+  void _updateRoleBasedView() {
+    if (_patientLocation == null || _providerLocation == null) return;
+    
+    // Check if route needs significant update (prevent flickering)
+    final shouldUpdateRoute = _shouldUpdateRoute();
+    
+    if (shouldUpdateRoute) {
+      _updateRouteStably();
+    }
+    
+    // Calculate distance
+    final distance = Geolocator.distanceBetween(
+      _patientLocation!.latitude,
+      _patientLocation!.longitude,
+      _providerLocation!.latitude,
+      _providerLocation!.longitude,
+    );
+    
+    if (_currentUserRole == 'patient') {
+      print('� [Patient View] Provider is ${(distance / 1000).toStringAsFixed(2)} km away');
+      // Patient view: Smoothly follow provider
+      _smoothFocusOnProvider();
+    } else if (_currentUserRole == 'provider') {
+      print('🩺 [Provider View] ${(distance / 1000).toStringAsFixed(2)} km to patient');
+      // Provider view: Stable route view
+      _maintainStableRouteView();
+    }
+  }
+
+  /// Patient view: Smoothly follow provider (like Uber passenger view)
+  void _smoothFocusOnProvider() {
+    if (_providerLocation != null) {
+      // Smooth animated move instead of instant jump
+      _mapController.move(_providerLocation!, 16.0);
+      // TODO: Could add smooth animation here if flutter_map supports it
+    }
+  }
+
+  /// Provider view: Maintain stable route view (like Uber driver view) 
+  void _maintainStableRouteView() {
+    // Only adjust view if route is stable
+    if (_isRouteStable) {
+      _fitMapToBothLocations();
+    }
+  }
+
+  /// Adjust map to show both patient and provider locations
+  void _fitMapToBothLocations() {
+    if (_patientLocation == null || _providerLocation == null) return;
+    
+    final bounds = LatLngBounds.fromPoints([_patientLocation!, _providerLocation!]);
+    _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
+  }
+
+  /// Check if route should be updated (avoid unnecessary redraws)
+  bool _shouldUpdateRoute() {
+    if (_lastRoutePatientLocation == null || _lastRouteProviderLocation == null) {
+      return true; // First time
+    }
+    
+    // Only update if significant movement (>10 meters to prevent flickering)
+    final patientMoved = Geolocator.distanceBetween(
+      _lastRoutePatientLocation!.latitude,
+      _lastRoutePatientLocation!.longitude,
+      _patientLocation!.latitude,
+      _patientLocation!.longitude,
+    ) > 10;
+    
+    final providerMoved = Geolocator.distanceBetween(
+      _lastRouteProviderLocation!.latitude,
+      _lastRouteProviderLocation!.longitude,
+      _providerLocation!.latitude,
+      _providerLocation!.longitude,
+    ) > 10;
+    
+    return patientMoved || providerMoved;
+  }
+
+  /// Update route with stability (like Uber)
+  void _updateRouteStably() {
+    // Cancel any pending route update
+    _routeStabilityTimer?.cancel();
+    
+    // Debounce route updates (wait for movement to stabilize)
+    _routeStabilityTimer = Timer(const Duration(milliseconds: 500), () {
+      if (_patientLocation != null && _providerLocation != null) {
+        setState(() {
+          _routePoints = [_patientLocation!, _providerLocation!];
+          _isRouteStable = true;
+        });
+        
+        // Remember last route positions
+        _lastRoutePatientLocation = _patientLocation;
+        _lastRouteProviderLocation = _providerLocation;
+        
+        print('📍 [Stable Route] Updated with debounce');
+      }
+    });
+  }
+
   @override
   void dispose() {
     _markerAnimationController.dispose();
@@ -327,7 +641,10 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
     _locationSubscription?.cancel();
     _providersSubscription?.cancel();
     _providerLocationSubscription?.cancel();
+    _appointmentSubscription?.cancel();
     _refreshTimer?.cancel();
+    _locationUpdateTimer?.cancel();
+    _routeStabilityTimer?.cancel();
     super.dispose();
   }
 
@@ -364,15 +681,24 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
               maxNativeZoom: 19,
             ),
             
-            // Route line
-            if (_routePoints.isNotEmpty)
+            // Stable route line (like Uber)
+            if (_routePoints.isNotEmpty && _isRouteStable)
               PolylineLayer(
                 polylines: [
+                  // Shadow line (background)
                   Polyline(
                     points: _routePoints,
-                    strokeWidth: 4.0,
-                    color: EnhancedAppTheme.primaryIndigo,
-                    pattern: StrokePattern.dashed(segments: [10, 5]),
+                    strokeWidth: 8.0,
+                    color: Colors.black.withOpacity(0.2),
+                  ),
+                  // Main route line
+                  Polyline(
+                    points: _routePoints,
+                    strokeWidth: 5.0,
+                    color: _currentUserRole == 'patient' 
+                        ? Colors.purple.shade600  // Patient tracking color
+                        : Colors.blue.shade600,   // Provider navigation color
+                    pattern: StrokePattern.solid(),
                   ),
                 ],
               ),
@@ -380,25 +706,46 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
             // Markers layer
             MarkerLayer(
               markers: [
-                // Current location marker
-                if (_currentLocation != null)
-                  Marker(
-                    point: _currentLocation!,
-                    width: 60,
-                    height: 60,
-                    child: _buildCurrentLocationMarker(),
-                  ),
-                
-                // Provider markers
-                ..._nearbyProviders.map((provider) => Marker(
-                  point: LatLng(
-                    provider.currentLocation?.latitude ?? 0,
-                    provider.currentLocation?.longitude ?? 0,
-                  ),
-                  width: 80,
-                  height: 80,
-                  child: _buildProviderMarker(provider),
-                )),
+                // Appointment mode: Show role-specific markers
+                if (widget.appointmentId != null) ...[
+                  // Patient marker (different emphasis based on role)
+                  if (_patientLocation != null)
+                    Marker(
+                      point: _patientLocation!,
+                      width: _currentUserRole == 'provider' ? 80 : 60, // Bigger for provider (destination)
+                      height: _currentUserRole == 'provider' ? 80 : 60,
+                      child: _buildPatientMarker(),
+                    ),
+                  // Provider marker (different emphasis based on role)
+                  if (_providerLocation != null)
+                    Marker(
+                      point: _providerLocation!,
+                      width: _currentUserRole == 'patient' ? 80 : 60, // Bigger for patient (tracking)
+                      height: _currentUserRole == 'patient' ? 80 : 60,
+                      child: _buildAppointmentProviderMarker(),
+                    ),
+                ] else ...[
+                  // Discovery mode: Show current location and nearby providers
+                  // Current location marker
+                  if (_currentLocation != null)
+                    Marker(
+                      point: _currentLocation!,
+                      width: 60,
+                      height: 60,
+                      child: _buildCurrentLocationMarker(),
+                    ),
+                  
+                  // Provider markers
+                  ..._nearbyProviders.map((provider) => Marker(
+                    point: LatLng(
+                      provider.currentLocation?.latitude ?? 0,
+                      provider.currentLocation?.longitude ?? 0,
+                    ),
+                    width: 80,
+                    height: 80,
+                    child: _buildProviderMarker(provider),
+                  )),
+                ],
               ],
             ),
 
@@ -408,6 +755,22 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
               right: 16,
               child: _buildMapControls(),
             ),
+
+            // Role indicator (only in appointment mode)
+            if (widget.appointmentId != null && _currentUserRole != null)
+              Positioned(
+                top: 16,
+                left: 16,
+                child: _buildRoleIndicator(),
+              ),
+
+            // Route status indicator (show route stability)
+            if (widget.appointmentId != null && _routePoints.isNotEmpty)
+              Positioned(
+                top: 70,
+                left: 16,
+                child: _buildRouteStatusIndicator(),
+              ),
 
             // Service type indicator
             if (widget.selectedServiceType != null)
@@ -433,6 +796,94 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildPatientMarker() {
+    final isCurrentUser = _currentUserRole == 'patient';
+    final isDestination = _currentUserRole == 'provider'; // For provider, patient is destination
+    
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: (isDestination ? Colors.orange : Colors.green).withOpacity(0.3 * _pulseAnimation.value),
+                blurRadius: (isDestination ? 20 : 15) * _pulseAnimation.value,
+                spreadRadius: (isDestination ? 12 : 8) * _pulseAnimation.value,
+              ),
+            ],
+          ),
+          child: Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: isDestination ? Colors.orange : (isCurrentUser ? Colors.green : Colors.green.shade300),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Icon(
+              isDestination ? Icons.location_on : Icons.person,
+              color: Colors.white,
+              size: isDestination ? 28 : (isCurrentUser ? 24 : 20),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAppointmentProviderMarker() {
+    final isCurrentUser = _currentUserRole == 'provider';
+    final isTracked = _currentUserRole == 'patient'; // For patient, provider is being tracked
+    
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        return Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: (isTracked ? Colors.purple : Colors.blue).withOpacity(0.3 * _pulseAnimation.value),
+                blurRadius: (isTracked ? 20 : 15) * _pulseAnimation.value,
+                spreadRadius: (isTracked ? 12 : 8) * _pulseAnimation.value,
+              ),
+            ],
+          ),
+          child: Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: isTracked ? Colors.purple : (isCurrentUser ? Colors.blue : Colors.blue.shade300),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Icon(
+              isTracked ? Icons.directions_car : Icons.local_hospital,
+              color: Colors.white,
+              size: isTracked ? 28 : (isCurrentUser ? 24 : 20),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -715,6 +1166,82 @@ class _FlutterMapTrackingWidgetState extends State<FlutterMapTrackingWidget>
                   fontWeight: FontWeight.bold,
                 ),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build role indicator showing current user's perspective
+  Widget _buildRoleIndicator() {
+    final isPatient = _currentUserRole == 'patient';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isPatient ? Colors.green : Colors.blue,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isPatient ? Icons.person : Icons.local_hospital,
+            color: Colors.white,
+            size: 16,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            isPatient ? 'Tracking Provider' : 'Navigating to Patient',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build route status indicator showing stability
+  Widget _buildRouteStatusIndicator() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: _isRouteStable ? Colors.green.withOpacity(0.9) : Colors.orange.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 2,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _isRouteStable ? Icons.navigation : Icons.refresh,
+            color: Colors.white,
+            size: 12,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            _isRouteStable ? 'Route Stable' : 'Updating...',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],

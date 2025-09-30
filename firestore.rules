@@ -95,6 +95,29 @@ service cloud.firestore {
         && resource.data.status == 'pending'; // Prevent editing confirmed appointments
     }
 
+    // === /provider_requests: Pre-appointment provider selection ===
+    match /provider_requests/{reqId} {
+      allow read: if request.auth != null && (
+        resource.data.patientId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid
+      );
+
+      // Patient creates request targeting a provider
+      allow create: if request.auth != null &&
+        (
+          request.resource.data.patientId == request.auth.uid ||
+          request.resource.data.idpat == request.auth.uid
+        );
+
+      // Updates: patient can cancel while pending; provider can accept
+      allow update: if request.auth != null && (
+        // Patient cancellation
+        (resource.data.patientId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.status in ['cancelled','pending']) ||
+        // Provider acceptance
+        (resource.data.providerId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.status == 'accepted')
+      );
+    }
+
     // === /avis: Patient reviews for professionals ===
     match /avis/{id_avis} {
       allow read: if request.auth != null;

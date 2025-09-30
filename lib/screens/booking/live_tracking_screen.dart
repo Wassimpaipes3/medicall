@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../widgets/maps/live_tracking_map.dart';
+import '../../widgets/maps/flutter_map_tracking_widget.dart';
 
 class LiveTrackingScreen extends StatefulWidget {
   final String? appointmentId;
@@ -20,6 +20,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   @override
   void initState() {
     super.initState();
+    print('🗺️ [LiveTrackingScreen] Initialized with appointmentId: ${widget.appointmentId}');
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
@@ -43,7 +44,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         elevation: 0,
         toolbarHeight: 100, // Increased from 74 to 100 for much lower positioning from top
       ),
-      body: LiveTrackingMapWidget(
+      body: FlutterMapTrackingWidget(
         appointmentId: widget.appointmentId,
         showNearbyProviders: widget.appointmentId == null,
       ),

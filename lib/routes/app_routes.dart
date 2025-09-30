@@ -21,6 +21,9 @@ class AppRoutes {
   static const payment = '/payment';
   static const appointments = '/appointments';
   static const liveTracking = '/live-tracking';
+  static const selectProvider = '/select-provider';
+  static const waitingAcceptance = '/waiting-acceptance';
+  static const tracking = '/tracking'; // alias used by waiting screen
   static const providerChat = '/provider-chat';
   
   // Test Routes
@@ -36,6 +39,7 @@ class AppRoutes {
   static const providerMessages = '/provider-messages';
   static const providerEarnings = '/provider-earnings';
   static const providerProfile = '/provider-profile';
+  static const providerRequests = '/provider-requests';
   
   // Enhanced Provider Routes
   static const enhancedAppointmentManagement = '/enhanced-appointment-management';

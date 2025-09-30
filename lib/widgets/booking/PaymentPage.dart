@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'ServiceSelectionPage.dart';
 import 'LocationSelectionPage.dart';
-import 'ProviderTrackingScreen.dart';
+import '../../screens/booking/select_provider_screen.dart';
 import '../../core/enhanced_theme.dart';
 import '../../data/services/healthcare_service_provider.dart';
 import '../../data/services/appointment_storage.dart';
-import '../../services/appointment_service.dart';
 
 enum PaymentMethod {
   cash,
@@ -762,8 +761,7 @@ class _PaymentPageState extends State<PaymentPage>
       
       // Prepare appointment data for Firestore
       final service = _getServiceName(widget.selectedSpecialty);
-      final type = 'instant'; // Can be 'instant' or 'scheduled' based on your logic
-      final patientAddress = widget.selectedLocation.address;
+  // Appointment type deferred; will be set when provider accepts
       
       // Create GeoPoint for patient location (using selected location coordinates)
       final patientLocation = GeoPoint(
@@ -771,41 +769,21 @@ class _PaymentPageState extends State<PaymentPage>
         widget.selectedLocation.longitude,
       );
       
-      print('💳 Payment successful! Creating appointment in Firestore...');
-      
-      // Create appointment in Firestore with your updated schema
-      // providerlocation will be null initially and set when provider accepts
-      final appointmentId = await AppointmentService.createAppointmentWithValidation(
-        service: service,
-        type: type,
-        patientAddress: patientAddress,
-        patientLocation: patientLocation,
-        prix: totalPrice,
-        paymentMethod: _getPaymentMethodText(),
-        serviceFee: widget.serviceFee,
-        notes: '', // Empty notes for now
-        // For instant appointments, these will be null
-        // For scheduled appointments, you would pass the actual dates
-        appointmentDate: type == 'scheduled' ? DateTime.now().add(const Duration(hours: 1)) : null,
-        endTime: type == 'scheduled' ? DateTime.now().add(const Duration(hours: 2)) : null,
-      );
-
-      print('✅ Firestore appointment created with ID: $appointmentId');
+      print('💳 Payment successful! Deferring appointment creation until provider accepts.');
 
       // Also save to local storage as backup (keep existing functionality)
       final localAppointmentData = {
-        'id': appointmentId,  // Use Firestore ID for consistency
+        'id': null,  // No appointment yet
         'serviceType': widget.selectedService.toString(),
         'specialty': widget.selectedSpecialty.toString(),
         'locationName': widget.selectedLocation.name,
         'locationAddress': widget.selectedLocation.address,
-        'appointmentTime': DateTime.now().add(const Duration(hours: 1)).toIso8601String(),
         'totalPrice': totalPrice,
         'paymentMethod': _getPaymentMethodText(),
         'basePrice': widget.basePrice,
         'travelFee': widget.travelFee,
         'serviceFee': widget.serviceFee,
-        'status': 'pending', // Changed to pending to match Firestore
+        'status': 'searching_provider',
         'createdAt': DateTime.now().toIso8601String(),
       };
 
@@ -821,27 +799,16 @@ class _PaymentPageState extends State<PaymentPage>
         _isProcessing = false;
       });
 
-      // Navigate to tracking screen after successful payment
+      // Navigate to provider selection screen after payment
       Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              ProviderTrackingScreen(
-                selectedService: widget.selectedService,
-                selectedSpecialty: widget.selectedSpecialty,
-                selectedLocation: widget.selectedLocation,
-                appointmentId: appointmentId,  // Pass Firestore appointment ID
-              ),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            const begin = Offset(1.0, 0.0);
-            const end = Offset.zero;
-            const curve = Curves.easeInOutCubic;
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
-            var offsetAnimation = animation.drive(tween);
-            return SlideTransition(position: offsetAnimation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 500),
+        MaterialPageRoute(
+          builder: (_) => SelectProviderScreen(
+            service: service,
+            specialty: _getServiceName(widget.selectedSpecialty),
+            prix: totalPrice,
+            paymentMethod: _getPaymentMethodText(),
+            patientLocation: patientLocation,
+          ),
         ),
       );
 

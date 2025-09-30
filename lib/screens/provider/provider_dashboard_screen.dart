@@ -152,6 +152,8 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     super.dispose();
   }
 
+
+
   void _handleNavigationTap(int index) {
     switch (index) {
       case 0:
@@ -924,12 +926,21 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                 },
               ),
             ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildActionButton(
+                title: 'Requests',
+                icon: Icons.inbox_outlined,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  Navigator.pushNamed(context, '/provider-requests');
+                },
+              ),
+            ),
           ],
         ),
         
         const SizedBox(height: 12),
-        
-        // (Removed debug Firestore button)
       ],
     );
   }
