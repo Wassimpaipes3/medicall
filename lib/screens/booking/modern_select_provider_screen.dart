@@ -6,6 +6,7 @@ import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:lottie/lottie.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/provider_request_service.dart';
+import 'live_tracking_screen.dart';
 
 class SelectProviderScreen extends StatefulWidget {
   final String service;
@@ -60,25 +61,28 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
     setState(() => _loading = true);
     
     final col = FirebaseFirestore.instance.collection('professionals');
-    final requestedService = widget.service.toLowerCase().trim();
+    final requestedService = (widget.service).toLowerCase().trim();
     final requestedSpecialty = widget.specialty?.toLowerCase().trim();
-
-    Query query = col.where('disponible', isEqualTo: true);
+    print('[ProviderQuery] service: "$requestedService", specialty: "$requestedSpecialty"');
+    Query query = col.where('disponible', whereIn: [true, 'true', 1, '1']);
     
     // Try to add service filter
     try {
       query = query.where('service', isEqualTo: requestedService);
+      print('[ProviderQuery] Added service filter: "$requestedService"');
       
       if (requestedSpecialty != null && requestedSpecialty.isNotEmpty) {
         query = query.where('specialite', isEqualTo: requestedSpecialty);
+        print('[ProviderQuery] Added specialty filter: "$requestedSpecialty"');
       }
     } catch (e) {
-      print('Service filter failed, using disponible only: $e');
+      print('[ProviderQuery] Service filter failed, using disponible only: $e');
     }
 
     _providersSubscription?.cancel();
     _providersSubscription = query.limit(25).snapshots().listen(
       (snapshot) {
+        print('[ProviderQuery] Query result:  [1m${snapshot.docs.length} [0m providers');
         if (snapshot.docs.isEmpty) {
           _tryFallbackStrategies();
         } else {
@@ -86,7 +90,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
         }
       },
       onError: (error) {
-        print('Stream error: $error');
+        print('[ProviderQuery] Stream error: $error');
         _handleStreamError();
       },
     );
@@ -114,11 +118,27 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
   void _tryFallbackStrategies() async {
     final col = FirebaseFirestore.instance.collection('professionals');
     try {
-      final snapshot = await col.where('disponible', isEqualTo: true).limit(25).get();
-      final results = snapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
-      _updateProviderList(results);
+      print('[ProviderQuery] Fallback: disponible only');
+      final availableSnapshot = await col.where('disponible', whereIn: [true, 'true', 1, '1']).limit(25).get();
+      print('[ProviderQuery] Fallback disponible result: ${availableSnapshot.docs.length}');
+      if (availableSnapshot.docs.isNotEmpty) {
+        final results = availableSnapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+        _updateProviderList(results);
+        return;
+      }
+      // Emergency fallback: show all providers
+      print('[ProviderQuery] EMERGENCY: Showing all providers (no filters)');
+      final allSnapshot = await col.limit(25).get();
+      print('[ProviderQuery] Emergency all providers result: ${allSnapshot.docs.length}');
+      if (allSnapshot.docs.isNotEmpty) {
+        final results = allSnapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+        _updateProviderList(results);
+        return;
+      }
+      print('[ProviderQuery] All fallback strategies failed');
+      _handleStreamError();
     } catch (e) {
-      print('Fallback failed: $e');
+      print('[ProviderQuery] Fallback exception: $e');
       _handleStreamError();
     }
   }
@@ -698,21 +718,55 @@ class ProviderData {
         providerLocation.longitude,
       ) / 1000.0; // Convert to km
     }
-
+    // Robust disponible check
+    final disponible = data['disponible'];
+    final isAvailable = disponible == true || disponible == 'true' || disponible == 1 || disponible == '1';
     return ProviderData(
       id: doc.id,
       name: data['login'] ?? data['nom'] ?? 'Healthcare Provider',
       specialty: data['specialite'] ?? data['specialty'] ?? 'General',
-      rating: (data['rating'] ?? 4.0).toDouble(),
-      price: (data['price'] ?? data['tarif'] ?? 100.0).toDouble(),
+      rating: _parseRating(data['rating']),
+      price: _parsePrice(data['price'] ?? data['tarif']),
       distance: distance,
-      isAvailable: data['disponible'] ?? false,
+      isAvailable: isAvailable,
       profilePicture: data['profile_picture'] ?? data['photo'],
       bio: data['bio'] ?? data['description'],
       experience: data['experience'] ?? data['experience_years']?.toString(),
       address: data['address'] ?? data['adresse'],
       contact: data['contact'] ?? data['telephone'],
     );
+  }
+
+  /// Helper method to safely parse rating from various data types
+  static double _parseRating(dynamic rating) {
+    if (rating == null) return 4.0;
+    
+    if (rating is num) {
+      return rating.toDouble();
+    }
+    
+    if (rating is String) {
+      final parsed = double.tryParse(rating);
+      return parsed ?? 4.0;
+    }
+    
+    return 4.0; // Default rating
+  }
+
+  /// Helper method to safely parse price from various data types
+  static double _parsePrice(dynamic price) {
+    if (price == null) return 100.0;
+    
+    if (price is num) {
+      return price.toDouble();
+    }
+    
+    if (price is String) {
+      final parsed = double.tryParse(price);
+      return parsed ?? 100.0;
+    }
+    
+    return 100.0; // Default price
   }
 }
 
@@ -1013,11 +1067,31 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
             return const Center(child: Text('Request not found'));
           }
 
+          // Debug logging
+          print('🔍 [WaitingScreen] Request data: ${data}');
+          print('🔍 [WaitingScreen] Status: ${data['status']}');
+          print('🔍 [WaitingScreen] AppointmentId: ${data['appointmentId']}');
+
+          // Check for acceptance and redirect
           if (data['status'] == 'accepted' && data['appointmentId'] != null) {
+            print('✅ [WaitingScreen] Provider accepted! Redirecting to tracking...');
+            print('📍 [WaitingScreen] AppointmentId: ${data['appointmentId']}');
+            
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              Navigator.of(context).pushReplacementNamed('/tracking', arguments: {
-                'appointmentId': data['appointmentId'],
-              });
+              print('🚀 [WaitingScreen] Attempting navigation to /tracking with appointmentId: ${data['appointmentId']}');
+              try {
+                Navigator.of(context).pushReplacementNamed('/tracking', arguments: {
+                  'appointmentId': data['appointmentId'],
+                });
+              } catch (e) {
+                print('❌ [WaitingScreen] Navigation error: $e');
+                // Fallback: try with MaterialPageRoute
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => LiveTrackingScreen(appointmentId: data['appointmentId']),
+                  ),
+                );
+              }
             });
           }
 
@@ -1078,6 +1152,69 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
                   ),
                   
                   const SizedBox(height: 40),
+                  
+                  // Debug info and manual redirect button
+                  if (data['status'] == 'accepted' && data['appointmentId'] != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.check_circle, color: Colors.green, size: 32),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Provider Accepted!',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Appointment ID: ${data['appointmentId']}',
+                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                print('🚀 [WaitingScreen] Manual redirect to /tracking with appointmentId: ${data['appointmentId']}');
+                                try {
+                                  Navigator.of(context).pushReplacementNamed('/tracking', arguments: {
+                                    'appointmentId': data['appointmentId'],
+                                  });
+                                } catch (e) {
+                                  print('❌ [WaitingScreen] Manual navigation error: $e');
+                                  // Fallback: try with MaterialPageRoute
+                                  Navigator.of(context).pushReplacement(
+                                    MaterialPageRoute(
+                                      builder: (context) => LiveTrackingScreen(appointmentId: data['appointmentId']),
+                                    ),
+                                  );
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              child: const Text('Go to Live Tracking'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   
                   SizedBox(
                     width: double.infinity,

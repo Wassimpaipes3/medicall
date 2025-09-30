@@ -5,7 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:lottie/lottie.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/provider_request_service.dart';
-import '../../debug/provider_query_test.dart';
+import '../../debug/provider_diagnostic.dart';
 
 class ProviderData {
   final String id;
@@ -42,17 +42,35 @@ class ProviderData {
         providerLocation.longitude,
       ) / 1000.0; // Convert to kilometers
     }
-
+    // Robust disponible check
+    final disponible = data['disponible'];
+    final isAvailable = disponible == true || disponible == 'true' || disponible == 1 || disponible == '1';
     return ProviderData(
       id: doc.id,
       name: data['nom'] ?? data['login'] ?? 'Unknown Provider',
       service: data['service'] ?? 'Unknown Service',
       specialty: data['specialite'] ?? 'General',
-      rating: (data['rating'] as num?)?.toDouble() ?? 4.0,
+      rating: _parseRating(data['rating']),
       distance: distance,
-      isAvailable: data['disponible'] ?? false,
+      isAvailable: isAvailable,
       imageUrl: data['profileImageUrl'] ?? '',
     );
+  }
+
+  /// Helper method to safely parse rating from various data types
+  static double _parseRating(dynamic rating) {
+    if (rating == null) return 4.0;
+    
+    if (rating is num) {
+      return rating.toDouble();
+    }
+    
+    if (rating is String) {
+      final parsed = double.tryParse(rating);
+      return parsed ?? 4.0;
+    }
+    
+    return 4.0; // Default rating
   }
 }
 
@@ -85,32 +103,22 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
   @override
   void initState() {
     super.initState();
-    // Run quick provider test
-    _testProviderAccess();
+    // Run comprehensive diagnostic
+    _runComprehensiveDiagnostic();
     _setupRealTimeProviderUpdates();
   }
   
-  void _testProviderAccess() async {
-    print('🔬 [Quick Test] Checking provider access...');
+  void _runComprehensiveDiagnostic() async {
+    print('🔬 [Diagnostic] Running comprehensive provider diagnostic...');
     try {
-      final col = FirebaseFirestore.instance.collection('professionals');
+      final results = await ProviderDiagnostic.runDiagnostic();
+      ProviderDiagnostic.printResults(results);
       
-      // Check collection access
-      final testQuery = await col.limit(1).get();
-      print('   Collection accessible: ${testQuery.docs.isNotEmpty}');
-      
-      if (testQuery.docs.isNotEmpty) {
-        final sample = testQuery.docs.first.data();
-        print('   Sample provider disponible: ${sample['disponible']}');
-        print('   Sample provider service: ${sample['service']}');
-      }
-      
-      // Check available providers
-      final availableQuery = await col.where('disponible', isEqualTo: true).limit(3).get();
-      print('   Available providers: ${availableQuery.docs.length}');
+      final issueSummary = ProviderDiagnostic.getIssueSummary(results);
+      print('🎯 ISSUE SUMMARY: $issueSummary');
       
     } catch (e) {
-      print('   ❌ Error: $e');
+      print('❌ Diagnostic failed: $e');
     }
   }
 
@@ -141,8 +149,8 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
     final requestedService = widget.service.toLowerCase().trim();
     final requestedSpecialty = widget.specialty?.toLowerCase().trim();
 
-    // Start with base query - available providers
-    Query query = col.where('disponible', isEqualTo: true);
+    // Use whereIn for robust disponible filter
+    Query query = col.where('disponible', whereIn: [true, 'true', 1, '1']);
     
     // Try flexible service matching
     bool serviceFilterAdded = false;
@@ -230,8 +238,8 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
         return;
       }
       
-      // Strategy 2: Get available providers (no service filter)
-      final availableSnapshot = await col.where('disponible', isEqualTo: true).limit(25).get();
+      // Strategy 2: Get available providers (no service filter, robust disponible)
+      final availableSnapshot = await col.where('disponible', whereIn: [true, 'true', 1, '1']).limit(25).get();
       print('   Strategy 2 - Available providers: ${availableSnapshot.docs.length}');
       
       if (availableSnapshot.docs.isNotEmpty) {
@@ -240,26 +248,8 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
         return;
       }
       
-      // Strategy 3: Try different boolean representations
-      print('   Strategy 3 - Trying boolean variations...');
-      final boolVariations = [true, 'true', 1, '1'];
-      
-      for (final variation in boolVariations) {
-        try {
-          final varSnapshot = await col.where('disponible', isEqualTo: variation).limit(5).get();
-          if (varSnapshot.docs.isNotEmpty) {
-            print('   ✅ Found providers with disponible=$variation');
-            final results = varSnapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
-            _updateProviderList(results);
-            return;
-          }
-        } catch (e) {
-          // Continue to next variation
-        }
-      }
-      
-      // Strategy 4: Emergency - show ALL providers regardless of availability
-      print('   Strategy 4 - EMERGENCY: Showing all providers...');
+      // Strategy 3: Emergency - show ALL providers regardless of availability
+      print('   Strategy 3 - EMERGENCY: Showing all providers...');
       final emergencySnapshot = await col.limit(10).get();
       if (emergencySnapshot.docs.isNotEmpty) {
         print('   🚨 EMERGENCY MODE: Showing ${emergencySnapshot.docs.length} providers regardless of availability');
@@ -469,6 +459,11 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
         ),
         actions: [
           IconButton(
+            onPressed: _runComprehensiveDiagnostic,
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'Run Diagnostic',
+          ),
+          IconButton(
             onPressed: _restartProviderStream,
             icon: const Icon(Icons.refresh),
           ),
@@ -530,20 +525,41 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      ElevatedButton(
-                        onPressed: _restartProviderStream,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1565C0),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          ElevatedButton(
+                            onPressed: _runComprehensiveDiagnostic,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            child: const Text('Debug'),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+                          const SizedBox(width: 16),
+                          ElevatedButton(
+                            onPressed: _restartProviderStream,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1565C0),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                            ),
+                            child: const Text('Refresh'),
                           ),
-                        ),
-                        child: const Text('Refresh'),
+                        ],
                       ),
                     ],
                   ),

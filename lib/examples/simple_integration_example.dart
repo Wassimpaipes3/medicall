@@ -145,3 +145,4 @@ class QuickReference {
     ProviderLocationService.stopLocationUpdates();
   }
 }
+

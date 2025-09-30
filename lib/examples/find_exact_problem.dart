@@ -25,3 +25,4 @@ Future<void> quickDocumentCheck() async {
   print('\n💡 If you see "❌ No documents found", you need to create a provider document first.');
   print('   If you see documents but updates fail, check the error messages above.');
 }
+

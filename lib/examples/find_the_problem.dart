@@ -33,3 +33,4 @@ Future<void> quickCheck() async {
   print('   then you need to create a provider document first.');
   print('   If you see documents but updates fail, then it\'s a permission issue.');
 }
+

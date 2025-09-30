@@ -335,3 +335,4 @@ class ComprehensiveDiagnostic {
     print('❌ Document not found → Check collection and field names');
   }
 }
+

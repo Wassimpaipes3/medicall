@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/booking/ServiceSelectionPage.dart';
 import '../../widgets/patient/patient_navigation_bar.dart';
 import '../../core/theme.dart';
+import '../../debug/quick_provider_check.dart';
 import '../../routes/app_routes.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -209,11 +210,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     print('\n🔍 TESTING PROVIDER ACCESS FROM HOME SCREEN');
     
     try {
+      // Quick check first
+      await checkProviders();
+      
       final firestore = FirebaseFirestore.instance;
       
       // Test 1: Basic collection access
       print('📊 Testing basic providers collection access...');
-      final providersCollection = firestore.collection('providers');
+      final providersCollection = firestore.collection('professionals');
       final snapshot = await providersCollection.limit(5).get();
       print('   Found ${snapshot.docs.length} providers total');
       
@@ -233,7 +237,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       print('📋 Analyzing provider data...');
       for (int i = 0; i < snapshot.docs.length; i++) {
         final doc = snapshot.docs[i];
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         print('   Provider ${i + 1}: ${doc.id}');
         print('     disponible: ${data['disponible']} (${data['disponible'].runtimeType})');
         print('     name: ${data['name']}');

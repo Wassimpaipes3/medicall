@@ -119,3 +119,4 @@ If you still get errors, check:
 4. Location permissions are granted
 ''');
 }
+

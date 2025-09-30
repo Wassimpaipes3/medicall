@@ -92,3 +92,4 @@ Future<void> tryUpdateOnce() async {
     print('❌ Location update failed. Check console for details.');
   }
 }
+
