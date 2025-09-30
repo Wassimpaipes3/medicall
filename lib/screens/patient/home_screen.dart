@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/booking/ServiceSelectionPage.dart';
 import '../../widgets/patient/patient_navigation_bar.dart';
 import '../../core/theme.dart';
@@ -204,6 +205,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _testProviderAccess() async {
+    print('\n🔍 TESTING PROVIDER ACCESS FROM HOME SCREEN');
+    
+    try {
+      final firestore = FirebaseFirestore.instance;
+      
+      // Test 1: Basic collection access
+      print('📊 Testing basic providers collection access...');
+      final providersCollection = firestore.collection('providers');
+      final snapshot = await providersCollection.limit(5).get();
+      print('   Found ${snapshot.docs.length} providers total');
+      
+      // Test 2: Available providers with strict filter
+      print('🔍 Testing strict disponible=true filter...');
+      final availableQuery = providersCollection.where('disponible', isEqualTo: true);
+      final availableSnapshot = await availableQuery.get();
+      print('   Found ${availableSnapshot.docs.length} disponible=true providers');
+      
+      // Test 3: Flexible boolean matching
+      print('🔄 Testing flexible boolean matching...');
+      final flexibleQuery = providersCollection.where('disponible', whereIn: [true, 'true', 1, '1']);
+      final flexibleSnapshot = await flexibleQuery.get();
+      print('   Found ${flexibleSnapshot.docs.length} providers with flexible boolean');
+      
+      // Test 4: Show all provider data
+      print('📋 Analyzing provider data...');
+      for (int i = 0; i < snapshot.docs.length; i++) {
+        final doc = snapshot.docs[i];
+        final data = doc.data() as Map<String, dynamic>;
+        print('   Provider ${i + 1}: ${doc.id}');
+        print('     disponible: ${data['disponible']} (${data['disponible'].runtimeType})');
+        print('     name: ${data['name']}');
+        print('     services: ${data['services']}');
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Debug complete! Found ${availableSnapshot.docs.length} available providers. Check console for details.'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      
+    } catch (e) {
+      print('❌ Error testing provider access: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -255,6 +311,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _handleBottomNavTap(index);
         },
         hasNotification: true, // You can make this dynamic based on actual notification state
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _testProviderAccess,
+        backgroundColor: Colors.red,
+        child: const Icon(Icons.bug_report, color: Colors.white),
       ),
     );
   }

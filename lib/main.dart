@@ -28,7 +28,7 @@ import 'package:firstv/screens/provider/enhanced_profile_screen.dart' as Provide
 import 'package:firstv/screens/provider/enhanced_messages_screen.dart';
 import 'package:firstv/screens/provider/enhanced_earnings_screen.dart';
 import 'package:firstv/screens/provider/enhanced_appointment_management_screen.dart';
-import 'package:firstv/screens/booking/select_provider_screen.dart';
+import 'package:firstv/screens/booking/modern_select_provider_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firstv/screens/provider/provider_requests_screen.dart';
 // Booking Flow Imports

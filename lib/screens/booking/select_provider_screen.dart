@@ -2,11 +2,62 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:lottie/lottie.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/provider_request_service.dart';
+import '../../debug/provider_query_test.dart';
+
+class ProviderData {
+  final String id;
+  final String name;
+  final String service;
+  final String specialty;
+  final double rating;
+  final double distance;
+  final bool isAvailable;
+  final String imageUrl;
+
+  ProviderData({
+    required this.id,
+    required this.name,
+    required this.service,
+    required this.specialty,
+    required this.rating,
+    required this.distance,
+    required this.isAvailable,
+    this.imageUrl = '',
+  });
+
+  factory ProviderData.fromFirestore(QueryDocumentSnapshot<Map<String, dynamic>> doc, GeoPoint patientLocation) {
+    final data = doc.data();
+    
+    // Calculate distance
+    double distance = 0.0;
+    final providerLocation = data['currentlocation'] as GeoPoint?;
+    if (providerLocation != null) {
+      distance = Geolocator.distanceBetween(
+        patientLocation.latitude,
+        patientLocation.longitude,
+        providerLocation.latitude,
+        providerLocation.longitude,
+      ) / 1000.0; // Convert to kilometers
+    }
+
+    return ProviderData(
+      id: doc.id,
+      name: data['nom'] ?? data['login'] ?? 'Unknown Provider',
+      service: data['service'] ?? 'Unknown Service',
+      specialty: data['specialite'] ?? 'General',
+      rating: (data['rating'] as num?)?.toDouble() ?? 4.0,
+      distance: distance,
+      isAvailable: data['disponible'] ?? false,
+      imageUrl: data['profileImageUrl'] ?? '',
+    );
+  }
+}
 
 class SelectProviderScreen extends StatefulWidget {
-  final String service; // normalized service name
+  final String service;
   final String? specialty;
   final double prix;
   final String paymentMethod;
@@ -26,18 +77,41 @@ class SelectProviderScreen extends StatefulWidget {
 }
 
 class _SelectProviderScreenState extends State<SelectProviderScreen> {
-  GoogleMapController? _mapController;
   bool _loading = true;
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> _providers = [];
-  String? _creatingRequestFor;
-  String _queryStrategy = 'initial';
+  List<ProviderData> _providers = [];
   StreamSubscription<QuerySnapshot>? _providersSubscription;
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
+    // Run quick provider test
+    _testProviderAccess();
     _setupRealTimeProviderUpdates();
+  }
+  
+  void _testProviderAccess() async {
+    print('🔬 [Quick Test] Checking provider access...');
+    try {
+      final col = FirebaseFirestore.instance.collection('professionals');
+      
+      // Check collection access
+      final testQuery = await col.limit(1).get();
+      print('   Collection accessible: ${testQuery.docs.isNotEmpty}');
+      
+      if (testQuery.docs.isNotEmpty) {
+        final sample = testQuery.docs.first.data();
+        print('   Sample provider disponible: ${sample['disponible']}');
+        print('   Sample provider service: ${sample['service']}');
+      }
+      
+      // Check available providers
+      final availableQuery = await col.where('disponible', isEqualTo: true).limit(3).get();
+      print('   Available providers: ${availableQuery.docs.length}');
+      
+    } catch (e) {
+      print('   ❌ Error: $e');
+    }
   }
 
   @override
@@ -47,353 +121,582 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
     super.dispose();
   }
 
-  /// Setup real-time provider updates using Firestore streams
   void _setupRealTimeProviderUpdates() {
-    print('🔄 [SelectProvider] Setting up real-time provider updates');
     _startProviderStream();
     
-    // Refresh stream every 30 seconds to catch any missed updates
+    // Refresh stream every 30 seconds
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      print('🔄 [SelectProvider] Refreshing provider stream');
       _restartProviderStream();
     });
   }
 
-  /// Start listening to provider changes in real-time
   void _startProviderStream() {
     setState(() => _loading = true);
+    
+    print('🔍 [SelectProvider] Starting provider stream...');
+    print('   Service: ${widget.service}');
+    print('   Specialty: ${widget.specialty}');
     
     final col = FirebaseFirestore.instance.collection('professionals');
     final requestedService = widget.service.toLowerCase().trim();
     final requestedSpecialty = widget.specialty?.toLowerCase().trim();
 
-    // Build primary query: disponible + service match
+    // Start with base query - available providers
     Query query = col.where('disponible', isEqualTo: true);
     
-    // Try to add service filter
+    // Try flexible service matching
+    bool serviceFilterAdded = false;
     try {
+      // Try exact match first
       query = query.where('service', isEqualTo: requestedService);
-      _queryStrategy = 'realtime_service';
-      
-      // Add specialty filter if provided
-      if (requestedSpecialty != null && requestedSpecialty.isNotEmpty) {
-        query = query.where('specialite', isEqualTo: requestedSpecialty);
-        _queryStrategy = 'realtime_service+specialty';
-      }
+      serviceFilterAdded = true;
+      print('   ✅ Added exact service filter: $requestedService');
     } catch (e) {
-      print('⚠️ [SelectProvider] Service filter failed, using disponible only: $e');
-      _queryStrategy = 'realtime_disponible_only';
+      print('   ❌ Exact service filter failed: $e');
+      // Will try fallback strategies
+    }
+    
+    // Add specialty filter if service filter was successful
+    if (serviceFilterAdded && requestedSpecialty != null && requestedSpecialty.isNotEmpty) {
+      try {
+        query = query.where('specialite', isEqualTo: requestedSpecialty);
+        print('   ✅ Added specialty filter: $requestedSpecialty');
+      } catch (e) {
+        print('   ❌ Specialty filter failed: $e');
+      }
     }
 
-    // Listen to real-time updates
     _providersSubscription?.cancel();
     _providersSubscription = query.limit(25).snapshots().listen(
       (snapshot) {
-        print('📱 [SelectProvider] Real-time update: ${snapshot.docs.length} providers available');
+        print('📊 [SelectProvider] Query result: ${snapshot.docs.length} providers');
         
-        // If no results with service filter, try fallback strategies
         if (snapshot.docs.isEmpty) {
+          print('   🔄 No providers found with filters, trying fallback...');
           _tryFallbackStrategies();
         } else {
+          print('   ✅ Found providers, updating UI...');
           _updateProviderList(snapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>());
         }
       },
       onError: (error) {
-        print('❌ [SelectProvider] Stream error: $error');
-        _handleStreamError();
+        print('❌ Stream error: $error');
+        _tryFallbackStrategies();  // Try fallback on stream error
       },
     );
   }
 
-  /// Restart the provider stream (for periodic refresh)
   void _restartProviderStream() {
     _providersSubscription?.cancel();
     _startProviderStream();
   }
 
-  /// Update provider list from stream data
   void _updateProviderList(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
     if (mounted) {
+      print('📋 [SelectProvider] Found ${docs.length} providers');
+      
+      if (docs.isNotEmpty) {
+        // Log first provider as sample
+        final sample = docs.first.data();
+        print('   Sample: ${sample['nom'] ?? sample['login']} - disponible:${sample['disponible']}');
+      }
+      
+      final providers = docs.map((doc) => ProviderData.fromFirestore(doc, widget.patientLocation)).toList();
+      
+      // Sort by distance
+      providers.sort((a, b) => a.distance.compareTo(b.distance));
+      
       setState(() {
-        _providers = docs;
+        _providers = providers;
         _loading = false;
       });
       
-      // Log provider status for debugging
-      if (docs.isNotEmpty) {
-        final sample = docs.first.data();
-        print('🧪 [SelectProvider] Sample provider: service=${sample['service']} disponible=${sample['disponible']} login=${sample['login']}');
-      }
-      
-      // Update map markers
-      _updateMapMarkers();
+      print('✅ [SelectProvider] Updated UI with ${providers.length} providers');
     }
   }
 
-  /// Try fallback strategies when main query returns empty
   void _tryFallbackStrategies() async {
-    print('🔄 [SelectProvider] Trying fallback: disponible only');
-    
+    print('🔄 [SelectProvider] Trying fallback strategies...');
     final col = FirebaseFirestore.instance.collection('professionals');
+    
     try {
-      // Fallback: Just show available providers
-      final snapshot = await col.where('disponible', isEqualTo: true).limit(25).get();
-      final results = snapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+      // Strategy 1: Check if any providers exist at all
+      final totalSnapshot = await col.limit(3).get();
+      print('   Strategy 1 - Total providers: ${totalSnapshot.docs.length}');
       
-      print('🔍 [SelectProvider] Fallback found ${results.length} available providers');
-      _updateProviderList(results);
-      _queryStrategy = 'fallback_disponible_only';
+      if (totalSnapshot.docs.isEmpty) {
+        print('   ❌ No providers exist in collection');
+        _handleStreamError();
+        return;
+      }
+      
+      // Strategy 2: Get available providers (no service filter)
+      final availableSnapshot = await col.where('disponible', isEqualTo: true).limit(25).get();
+      print('   Strategy 2 - Available providers: ${availableSnapshot.docs.length}');
+      
+      if (availableSnapshot.docs.isNotEmpty) {
+        final results = availableSnapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+        _updateProviderList(results);
+        return;
+      }
+      
+      // Strategy 3: Try different boolean representations
+      print('   Strategy 3 - Trying boolean variations...');
+      final boolVariations = [true, 'true', 1, '1'];
+      
+      for (final variation in boolVariations) {
+        try {
+          final varSnapshot = await col.where('disponible', isEqualTo: variation).limit(5).get();
+          if (varSnapshot.docs.isNotEmpty) {
+            print('   ✅ Found providers with disponible=$variation');
+            final results = varSnapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+            _updateProviderList(results);
+            return;
+          }
+        } catch (e) {
+          // Continue to next variation
+        }
+      }
+      
+      // Strategy 4: Emergency - show ALL providers regardless of availability
+      print('   Strategy 4 - EMERGENCY: Showing all providers...');
+      final emergencySnapshot = await col.limit(10).get();
+      if (emergencySnapshot.docs.isNotEmpty) {
+        print('   🚨 EMERGENCY MODE: Showing ${emergencySnapshot.docs.length} providers regardless of availability');
+        final results = emergencySnapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+        _updateProviderList(results);
+        return;
+      }
+      
+      print('   ❌ All fallback strategies failed');
+      _handleStreamError();
+      
     } catch (e) {
-      print('❌ [SelectProvider] Fallback failed: $e');
+      print('❌ Fallback exception: $e');
       _handleStreamError();
     }
   }
 
-  /// Handle stream errors
   void _handleStreamError() {
     if (mounted) {
       setState(() {
         _loading = false;
-        _providers = [];
-        _queryStrategy = 'error';
       });
     }
   }
 
-  /// Update map markers when providers change
-  void _updateMapMarkers() {
-    // Update map camera to show all providers
-    if (_providers.isNotEmpty && _mapController != null) {
-      final points = <LatLng>[];
-      points.add(LatLng(widget.patientLocation.latitude, widget.patientLocation.longitude));
-      
-      for (final p in _providers) {
-        final geo = p.data()['currentlocation'];
-        if (geo is GeoPoint) {
-          points.add(LatLng(geo.latitude, geo.longitude));
-        }
-      }
-      
-      if (points.length > 1) {
-        _fitMapToPoints(points);
-      }
-    }
-  }
-
-  /// Fit map to show all points
-  Future<void> _fitMapToPoints(List<LatLng> points) async {
-    double minLat = points.first.latitude, maxLat = points.first.latitude;
-    double minLng = points.first.longitude, maxLng = points.first.longitude;
-    
-    for (final pt in points) {
-      if (pt.latitude < minLat) minLat = pt.latitude;
-      if (pt.latitude > maxLat) maxLat = pt.latitude;
-      if (pt.longitude < minLng) minLng = pt.longitude;
-      if (pt.longitude > maxLng) maxLng = pt.longitude;
-    }
-    
-    final bounds = LatLngBounds(
-      southwest: LatLng(minLat, minLng), 
-      northeast: LatLng(maxLat, maxLng)
-    );
-    
-    await Future.delayed(const Duration(milliseconds: 200));
-    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 60));
-  }
-
-  double _distanceKm(GeoPoint? providerLoc) {
-    if (providerLoc == null) return 0;
-    final p = widget.patientLocation;
-    final d = Geolocator.distanceBetween(
-      p.latitude, p.longitude, providerLoc.latitude, providerLoc.longitude,
-    );
-    return d / 1000.0;
-  }
-
-  Future<void> _selectProvider(QueryDocumentSnapshot<Map<String, dynamic>> doc) async {
-    final data = doc.data();
-    // FIX: Use doc.id (which should match auth.uid) instead of id_user field
-    final providerId = doc.id;  // This should match the provider's Firebase Auth UID
-    
-    // Debug: Log provider data to understand the structure
-    print('🔍 [SelectProvider] Selected provider data:');
-    print('   📄 doc.id: ${doc.id}');
-    print('   👤 id_user: ${data['id_user']}');
-    print('   🎯 Using providerId: $providerId (fixed to use doc.id)');
-    print('   📋 Full data: ${data.keys.toList()}');
-    
-    setState(() => _creatingRequestFor = providerId);
+  void _selectProvider(ProviderData provider) async {
     try {
       final requestId = await ProviderRequestService.createRequest(
-        providerId: providerId,
+        providerId: provider.id,
         service: widget.service,
         specialty: widget.specialty,
         prix: widget.prix,
         paymentMethod: widget.paymentMethod,
         patientLocation: widget.patientLocation,
       );
-
+      
       if (!mounted) return;
+      
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Request sent! Waiting for provider acceptance.')),
       );
-
-      // Navigate to a lightweight waiting screen (reuse this with a banner)
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => WaitingForAcceptanceScreen(requestId: requestId),
-        ),
+      
+      Navigator.pushNamed(
+        context,
+        '/waiting-for-provider',
+        arguments: {
+          'requestId': requestId,
+          'providerId': provider.id,
+          'providerName': provider.name,
+          'service': widget.service,
+          'location': widget.patientLocation,
+        },
       );
     } catch (e) {
-      debugPrint('Error creating request: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to send request: $e')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _creatingRequestFor = null);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final patientPos = LatLng(widget.patientLocation.latitude, widget.patientLocation.longitude);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Select Provider'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(24),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8.0),
-            child: Text(
-              'Strategy: $_queryStrategy  •  Found: ${_providers.length}',
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
-            ),
+  void _showProviderDetails(ProviderData provider) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        maxChildSize: 0.9,
+        minChildSize: 0.5,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(24),
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 30,
+                          backgroundImage: provider.imageUrl.isNotEmpty
+                              ? CachedNetworkImageProvider(provider.imageUrl)
+                              : null,
+                          child: provider.imageUrl.isEmpty
+                              ? const Icon(Icons.person, size: 30)
+                              : null,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                provider.name,
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                '${provider.service} • ${provider.specialty}',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    _buildDetailRow(Icons.star, 'Rating', '${provider.rating.toStringAsFixed(1)} ⭐'),
+                    const SizedBox(height: 16),
+                    _buildDetailRow(Icons.location_on, 'Distance', '${provider.distance.toStringAsFixed(1)} km away'),
+                    const SizedBox(height: 16),
+                    _buildDetailRow(Icons.access_time, 'Availability', provider.isAvailable ? 'Available now' : 'Busy'),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _selectProvider(provider);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1565C0),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                        ),
+                        child: const Text(
+                          'Book Appointment',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
-      body: Column(
-        children: [
-          SizedBox(
-            height: 260,
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(target: patientPos, zoom: 13),
-              myLocationEnabled: false,
-              markers: {
-                Marker(markerId: const MarkerId('patient'), position: patientPos, infoWindow: const InfoWindow(title: 'You')),
-                ..._providers.map((p) {
-                  final geo = p.data()['currentlocation'];
-                  if (geo is GeoPoint) {
-                    return Marker(
-                      markerId: MarkerId('pro_${p.id}'),
-                      position: LatLng(geo.latitude, geo.longitude),
-                      infoWindow: InfoWindow(title: p.data()['login'] ?? 'Provider'),
-                    );
-                  }
-                  return const Marker(markerId: MarkerId('x'), position: LatLng(0,0));
-                }).where((m) => m.markerId.value != 'x')
-              },
-              onMapCreated: (c) => _mapController = c,
-            ),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _providers.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('No matching providers found'),
-                            const SizedBox(height: 8),
-                            Text('Tried: $_queryStrategy', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                            const SizedBox(height: 16),
-                            ElevatedButton.icon(
-                              onPressed: _restartProviderStream,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Retry'),
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: _providers.length,
-                        itemBuilder: (ctx, i) {
-                          final data = _providers[i].data();
-                          final providerLoc = data['currentlocation'];
-                          final distance = _distanceKm(providerLoc is GeoPoint ? providerLoc : null);
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            child: ListTile(
-                              leading: CircleAvatar(child: Text((data['login'] ?? 'P')[0].toUpperCase())),
-                              title: Text(data['login'] ?? 'Provider'),
-                              subtitle: Text('Rating: ${data['rating'] ?? 'N/A'} • ${distance.toStringAsFixed(1)} km'),
-                              trailing: _creatingRequestFor == (data['id_user'] ?? _providers[i].id)
-                                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : ElevatedButton(
-                                      onPressed: () => _selectProvider(_providers[i]),
-                                      child: const Text('Request'),
-                                    ),
-                            ),
-                          );
-                        },
-                      ),
-          )
-        ],
-      ),
     );
   }
-}
 
-/// Simple waiting screen that listens for request acceptance
-class WaitingForAcceptanceScreen extends StatelessWidget {
-  final String requestId;
-  const WaitingForAcceptanceScreen({super.key, required this.requestId});
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, color: const Color(0xFF1565C0), size: 20),
+        const SizedBox(width: 12),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Waiting for Provider')),
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: FirebaseFirestore.instance.collection('provider_requests').doc(requestId).snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          final data = snapshot.data!.data() as Map<String, dynamic>?;
-          if (data == null) return const Center(child: Text('Request not found'));
-
-            if (data['status'] == 'accepted' && data['appointmentId'] != null) {
-              // Navigate to tracking screen lazily
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                print('🚀 [Patient] Navigating to tracking with appointmentId: ${data['appointmentId']}');
-                Navigator.of(context).pushReplacementNamed('/tracking', arguments: {
-                  'appointmentId': data['appointmentId'],
-                });
-              });
-            }
-
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(height: 16),
-                const Text('Waiting for provider to accept...'),
-                const SizedBox(height: 8),
-                Text('Status: ${data['status']}'),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: () async {
-                    await ProviderRequestService.cancelRequest(requestId);
-                    if (context.mounted) Navigator.of(context).pop();
-                  },
-                  child: const Text('Cancel'),
-                )
-              ],
-            ),
-          );
-        },
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1565C0),
+        title: Text(
+          'Select ${widget.service}',
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1565C0),
+          ),
+        ),
+        actions: [
+          IconButton(
+            onPressed: _restartProviderStream,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
+      body: _loading
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 100,
+                    height: 100,
+                    child: Lottie.asset(
+                      'assets/animations/loading.json',
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Finding available providers...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : _providers.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 150,
+                        height: 150,
+                        child: Lottie.asset(
+                          'assets/animations/empty.json',
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'No providers available',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Try adjusting your search or check back later',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: _restartProviderStream,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1565C0),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        child: const Text('Refresh'),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _providers.length,
+                  itemBuilder: (context, index) {
+                    final provider = _providers[index];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      child: Card(
+                        elevation: 2,
+                        shadowColor: Colors.black.withOpacity(0.1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: InkWell(
+                          onTap: () => _showProviderDetails(provider),
+                          borderRadius: BorderRadius.circular(16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 24,
+                                      backgroundImage: provider.imageUrl.isNotEmpty
+                                          ? CachedNetworkImageProvider(provider.imageUrl)
+                                          : null,
+                                      child: provider.imageUrl.isEmpty
+                                          ? const Icon(Icons.person, size: 24)
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            provider.name,
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                              color: Color(0xFF1E293B),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${provider.service} • ${provider.specialty}',
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              color: Color(0xFF64748B),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: provider.isAvailable
+                                            ? Colors.green.shade50
+                                            : Colors.orange.shade50,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: provider.isAvailable
+                                              ? Colors.green.shade200
+                                              : Colors.orange.shade200,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        provider.isAvailable ? 'Available' : 'Busy',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: provider.isAvailable
+                                              ? Colors.green.shade700
+                                              : Colors.orange.shade700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.star,
+                                      size: 16,
+                                      color: Colors.amber,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      provider.rating.toStringAsFixed(1),
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: Color(0xFF1E293B),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    const Icon(
+                                      Icons.location_on,
+                                      size: 16,
+                                      color: Color(0xFF64748B),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '${provider.distance.toStringAsFixed(1)} km away',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xFF64748B),
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    ElevatedButton(
+                                      onPressed: () => _selectProvider(provider),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF1565C0),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 8,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        elevation: 0,
+                                      ),
+                                      child: const Text(
+                                        'Book',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }
