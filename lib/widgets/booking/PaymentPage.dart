@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'ServiceSelectionPage.dart';
 import 'LocationSelectionPage.dart';
-import '../../screens/booking/select_provider_screen.dart';
+import '../../screens/booking/polished_select_provider_screen.dart';
 import '../../core/enhanced_theme.dart';
 import '../../data/services/healthcare_service_provider.dart';
 import '../../data/services/appointment_storage.dart';
@@ -802,7 +802,7 @@ class _PaymentPageState extends State<PaymentPage>
       // Navigate to provider selection screen after payment
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => SelectProviderScreen(
+          builder: (_) => PolishedSelectProviderScreen(
             service: service,
             specialty: _getServiceName(widget.selectedSpecialty),
             prix: totalPrice,

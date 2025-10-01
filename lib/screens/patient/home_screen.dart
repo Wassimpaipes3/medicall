@@ -5,6 +5,7 @@ import '../../widgets/booking/ServiceSelectionPage.dart';
 import '../../widgets/patient/patient_navigation_bar.dart';
 import '../../core/theme.dart';
 import '../../debug/quick_provider_check.dart';
+import '../../debug/route_test_utility.dart';
 import '../../routes/app_routes.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -316,10 +317,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         },
         hasNotification: true, // You can make this dynamic based on actual notification state
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _testProviderAccess,
-        backgroundColor: Colors.red,
-        child: const Icon(Icons.bug_report, color: Colors.white),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            heroTag: "route_test",
+            onPressed: () {
+              RouteTestUtility.testRoutesConsistency(context);
+              // Test navigation to tracking with sample ID
+              RouteTestUtility.testTrackingNavigation(context, 'sample_test_123');
+            },
+            backgroundColor: Colors.blue,
+            mini: true,
+            child: const Icon(Icons.route, color: Colors.white),
+          ),
+          const SizedBox(height: 8),
+          FloatingActionButton(
+            heroTag: "provider_test", 
+            onPressed: _testProviderAccess,
+            backgroundColor: Colors.red,
+            child: const Icon(Icons.bug_report, color: Colors.white),
+          ),
+        ],
       ),
     );
   }

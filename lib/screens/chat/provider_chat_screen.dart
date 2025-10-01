@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
+import '../../routes/app_routes.dart';
 import '../../services/chat_service.dart';
 import '../../services/provider_tracking_service.dart';
 import '../../data/services/location_service.dart';
@@ -355,7 +356,9 @@ class _ProviderChatScreenState extends State<ProviderChatScreen> {
           ),
           TextButton.icon(
             onPressed: () {
-              Navigator.pushNamed(context, '/live-tracking');
+              Navigator.pushNamed(context, AppRoutes.liveTracking, arguments: {
+                'appointmentId': 'demo-appointment-${DateTime.now().millisecondsSinceEpoch}',
+              });
             },
             icon: const Icon(Icons.map, size: 16),
             label: const Text('Track'),

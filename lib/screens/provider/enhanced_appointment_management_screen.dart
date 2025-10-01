@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/theme.dart';
 import '../../core/services/call_service.dart';
 import '../../routes/app_routes.dart';
 import '../../services/provider/provider_service.dart';
 import '../../widgets/provider/provider_navigation_bar.dart';
+import '../../services/provider_request_service.dart';
 
 class EnhancedAppointmentManagementScreen extends StatefulWidget {
   const EnhancedAppointmentManagementScreen({super.key});
@@ -988,9 +991,26 @@ class _EnhancedAppointmentManagementScreenState extends State<EnhancedAppointmen
 
   Future<void> _acceptAppointment(String appointmentId) async {
     try {
-      await _providerService.acceptAppointment(appointmentId);
+      // Get current GPS (fallback 0,0)
+      Position? pos;
+      try { pos = await Geolocator.getCurrentPosition(); } catch (_) {}
+      final providerGeo = GeoPoint(pos?.latitude ?? 0, pos?.longitude ?? 0);
+
+      // Create appointment in Firestore and update provider_requests
+      final createdAppointmentId = await ProviderRequestService.acceptRequestAndCreateAppointment(
+        requestId: appointmentId,
+        providerLocation: providerGeo,
+      );
+
       await _loadAppointments();
       _showSuccessSnackBar('Appointment accepted successfully!');
+
+      if (mounted) {
+        print('🚀 [Enhanced Appointment] Navigating to tracking with appointmentId: $createdAppointmentId');
+        Navigator.of(context).pushNamed(AppRoutes.tracking, arguments: {
+          'appointmentId': createdAppointmentId,
+        });
+      }
     } catch (e) {
       _showErrorSnackBar('Failed to accept appointment: $e');
     }

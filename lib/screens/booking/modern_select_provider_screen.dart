@@ -6,6 +6,7 @@ import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:lottie/lottie.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/provider_request_service.dart';
+import '../../routes/app_routes.dart';
 import 'live_tracking_screen.dart';
 
 class SelectProviderScreen extends StatefulWidget {
@@ -34,6 +35,10 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
   String? _creatingRequestFor;
   StreamSubscription<QuerySnapshot>? _providersSubscription;
   Timer? _refreshTimer;
+  // UI Colors
+  static const Color _primaryColor = Color(0xFF1976D2);
+  static const Color _successColor = Color(0xFF43A047);
+  static const Color _errorColor = Color(0xFFE53935);
 
   @override
   void initState() {
@@ -210,11 +215,11 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFB),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1565C0),
+        foregroundColor: const Color(0xFF1976D2),
         title: const Text(
           'Select Healthcare Provider',
           style: TextStyle(
@@ -238,7 +243,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
-                    color: Color(0xFF1565C0),
+                    color: _primaryColor,
                   ),
                 ),
                 if (widget.specialty != null) ...[
@@ -301,7 +306,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                 onPressed: _cancelBooking,
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  side: const BorderSide(color: Color(0xFF1565C0)),
+                  side: const BorderSide(color: _primaryColor),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -311,7 +316,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF1565C0),
+                    color: _primaryColor,
                   ),
                 ),
               ),
@@ -341,7 +346,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w500,
-              color: Color(0xFF1565C0),
+              color: _primaryColor,
             ),
           ),
         ],
@@ -387,7 +392,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
             ElevatedButton.icon(
               onPressed: _restartProviderStream,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1565C0),
+                backgroundColor: _primaryColor,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(
@@ -409,7 +414,11 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
       itemCount: _providers.length,
       itemBuilder: (context, index) {
         final provider = _providers[index];
-        return _buildProviderCard(provider);
+        return InkWell(
+          onTap: () => _showProviderDetails(provider),
+          borderRadius: BorderRadius.circular(16),
+          child: _buildProviderCard(provider),
+        );
       },
     );
   }
@@ -425,8 +434,8 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -504,13 +513,21 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                               ),
                             ),
                           ),
-                          // Availability Status
+                          // Availability Badge
                           Container(
-                            width: 12,
-                            height: 12,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: provider.isAvailable ? Colors.green : Colors.grey,
+                              color: provider.isAvailable ? _successColor.withOpacity(0.1) : Colors.grey.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: provider.isAvailable ? _successColor.withOpacity(0.25) : Colors.grey.withOpacity(0.2)),
+                            ),
+                            child: Text(
+                              provider.isAvailable ? 'Available' : 'Busy',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: provider.isAvailable ? _successColor : Colors.grey[700],
+                              ),
                             ),
                           ),
                         ],
@@ -589,7 +606,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                 const Icon(
                   Icons.monetization_on,
                   size: 18,
-                  color: Color(0xFF1565C0),
+                  color: _primaryColor,
                 ),
                 const SizedBox(width: 8),
                 Text(
@@ -597,7 +614,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF1565C0),
+                    color: _primaryColor,
                   ),
                 ),
               ],
@@ -613,7 +630,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                     onPressed: () => _showProviderDetails(provider),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: const BorderSide(color: Color(0xFF1565C0)),
+                      side: const BorderSide(color: _primaryColor),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -623,7 +640,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF1565C0),
+                        color: _primaryColor,
                       ),
                     ),
                   ),
@@ -637,7 +654,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
                         ? null 
                         : () => _selectProvider(provider),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1565C0),
+                      backgroundColor: _primaryColor,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
@@ -1038,11 +1055,11 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFB),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1565C0),
+        foregroundColor: const Color(0xFF1976D2),
         title: const Text(
           'Waiting for Provider',
           style: TextStyle(
@@ -1068,7 +1085,7 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
           }
 
           // Debug logging
-          print('🔍 [WaitingScreen] Request data: ${data}');
+          print('🔍 [WaitingScreen] Request data: $data');
           print('🔍 [WaitingScreen] Status: ${data['status']}');
           print('🔍 [WaitingScreen] AppointmentId: ${data['appointmentId']}');
 
@@ -1079,79 +1096,102 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
             
             WidgetsBinding.instance.addPostFrameCallback((_) {
               print('🚀 [WaitingScreen] Attempting navigation to /tracking with appointmentId: ${data['appointmentId']}');
+              print('🔧 [WaitingScreen] Context widget tree check passed');
+              
               try {
-                Navigator.of(context).pushReplacementNamed('/tracking', arguments: {
+                Navigator.of(context).pushReplacementNamed(AppRoutes.tracking, arguments: {
                   'appointmentId': data['appointmentId'],
                 });
+                print('✅ [WaitingScreen] Navigation initiated successfully');
               } catch (e) {
                 print('❌ [WaitingScreen] Navigation error: $e');
-                // Fallback: try with MaterialPageRoute
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (context) => LiveTrackingScreen(appointmentId: data['appointmentId']),
-                  ),
-                );
+                print('🔄 [WaitingScreen] Trying fallback with MaterialPageRoute...');
+                try {
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) => LiveTrackingScreen(appointmentId: data['appointmentId']),
+                    ),
+                  );
+                  print('✅ [WaitingScreen] Fallback navigation successful');
+                } catch (fallbackError) {
+                  print('❌ [WaitingScreen] Fallback navigation also failed: $fallbackError');
+                }
               }
             });
           }
 
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(40),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 150,
-                    height: 150,
-                    child: Lottie.asset(
-                      'assets/animations/waiting.json',
-                      repeat: true,
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 32),
-                  
-                  const Text(
-                    'Waiting for provider response',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF263238),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  
-                  const SizedBox(height: 12),
-                  
-                  Text(
-                    'We\'ve sent your request to the provider. You\'ll be notified once they respond.',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  
-                  const SizedBox(height: 8),
-                  
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1565C0).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'Status: ${data['status']}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF1565C0),
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
-                    ),
+                    ],
                   ),
-                  
-                  const SizedBox(height: 40),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1976D2).withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.person, color: Color(0xFF1976D2)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              (data['providerName'] ?? 'Healthcare Provider').toString(),
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF263238)),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              (data['service'] ?? 'Service').toString(),
+                              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (data['prix'] != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1976D2).withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text('', style: TextStyle()),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(width: 200, height: 200, child: Lottie.asset('assets/animations/waiting.json', repeat: true)),
+                const SizedBox(height: 24),
+                const Text('Waiting for provider to accept your request…', textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Color(0xFF263238))),
+                const SizedBox(height: 12),
+                Text('You will be redirected automatically once the provider accepts.', textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(color: const Color(0xFF1976D2).withOpacity(0.08), borderRadius: BorderRadius.circular(20)),
+                  child: Text('Status: ${data['status']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1976D2))),
+                ),
+                const Spacer(),
                   
                   // Debug info and manual redirect button
                   if (data['status'] == 'accepted' && data['appointmentId'] != null) ...[
@@ -1185,19 +1225,42 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
                             width: double.infinity,
                             child: ElevatedButton(
                               onPressed: () {
-                                print('🚀 [WaitingScreen] Manual redirect to /tracking with appointmentId: ${data['appointmentId']}');
+                                final appointmentId = data['appointmentId'];
+                                print('🚀 [WaitingScreen] Manual redirect to /tracking with appointmentId: $appointmentId');
+                                
+                                if (appointmentId == null || appointmentId.isEmpty) {
+                                  print('❌ [WaitingScreen] ERROR: appointmentId is null or empty!');
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Error: No appointment ID available')),
+                                  );
+                                  return;
+                                }
+                                
                                 try {
-                                  Navigator.of(context).pushReplacementNamed('/tracking', arguments: {
-                                    'appointmentId': data['appointmentId'],
+                                  print('📍 [WaitingScreen] Navigating with route: /tracking');
+                                  print('📍 [WaitingScreen] Arguments: {appointmentId: $appointmentId}');
+                                  
+                                  Navigator.of(context).pushReplacementNamed(AppRoutes.tracking, arguments: {
+                                    'appointmentId': appointmentId,
                                   });
+                                  print('✅ [WaitingScreen] Manual navigation initiated');
                                 } catch (e) {
                                   print('❌ [WaitingScreen] Manual navigation error: $e');
-                                  // Fallback: try with MaterialPageRoute
-                                  Navigator.of(context).pushReplacement(
-                                    MaterialPageRoute(
-                                      builder: (context) => LiveTrackingScreen(appointmentId: data['appointmentId']),
-                                    ),
-                                  );
+                                  print('🔄 [WaitingScreen] Trying fallback...');
+                                  
+                                  try {
+                                    Navigator.of(context).pushReplacement(
+                                      MaterialPageRoute(
+                                        builder: (context) => LiveTrackingScreen(appointmentId: appointmentId),
+                                      ),
+                                    );
+                                    print('✅ [WaitingScreen] Fallback navigation successful');
+                                  } catch (fallbackError) {
+                                    print('❌ [WaitingScreen] Fallback also failed: $fallbackError');
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Navigation failed: $fallbackError')),
+                                    );
+                                  }
                                 }
                               },
                               style: ElevatedButton.styleFrom(
@@ -1216,32 +1279,43 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
                     ),
                   ],
                   
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () async {
-                        await ProviderRequestService.cancelRequest(requestId);
-                        if (context.mounted) Navigator.of(context).pop();
-                      },
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: const BorderSide(color: Colors.red),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Cancel request?'),
+                          content: const Text('Are you sure you want to cancel this request?'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Keep Waiting')),
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Yes, Cancel', style: TextStyle(color: Color(0xFFE53935)))),
+                          ],
                         ),
-                      ),
-                      child: const Text(
-                        'Cancel Request',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.red,
-                        ),
-                      ),
+                      );
+                      if (confirm == true) {
+                        try { await ProviderRequestService.cancelRequest(requestId); } catch (_) {}
+                        if (context.mounted) {
+                          Navigator.of(context).pushReplacementNamed(AppRoutes.selectProvider, arguments: {
+                            'service': data['service'] ?? 'consultation',
+                            'specialty': data['specialty'],
+                            'prix': (data['prix'] ?? 0).toDouble(),
+                            'paymentMethod': data['paymentMethod'] ?? 'Cash',
+                            'patientLocation': data['patientLocation'] ?? const GeoPoint(0,0),
+                          });
+                        }
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      side: const BorderSide(color: Color(0xFFE53935)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
+                    child: const Text('Cancel Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFFE53935))),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         },

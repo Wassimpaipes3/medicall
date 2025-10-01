@@ -513,3 +513,5 @@ class UnifiedProviderLocationService {
   static int get updateIntervalSeconds => updateInterval.inSeconds;
 }
 
+
+

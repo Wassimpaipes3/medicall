@@ -28,7 +28,7 @@ import 'package:firstv/screens/provider/enhanced_profile_screen.dart' as Provide
 import 'package:firstv/screens/provider/enhanced_messages_screen.dart';
 import 'package:firstv/screens/provider/enhanced_earnings_screen.dart';
 import 'package:firstv/screens/provider/enhanced_appointment_management_screen.dart';
-import 'package:firstv/screens/booking/modern_select_provider_screen.dart';
+import 'package:firstv/screens/booking/polished_select_provider_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firstv/screens/provider/provider_requests_screen.dart';
 // Booking Flow Imports
@@ -124,10 +124,16 @@ class MyApp extends StatelessWidget {
         ),
         AppRoutes.serviceSelection: (context) => const ServiceSelectionPage(),
         AppRoutes.appointments: (context) => const AppointmentsPage(),
-  AppRoutes.liveTracking: (context) => const LiveTrackingScreen(),
+        AppRoutes.liveTracking: (context) {
+          print('🗺️ [Router] /live-tracking route accessed');
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final appointmentId = args?['appointmentId'] as String?;
+          print('📍 [Router] AppointmentId from arguments: $appointmentId');
+          return LiveTrackingScreen(appointmentId: appointmentId);
+        },
         AppRoutes.selectProvider: (context) {
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-          return SelectProviderScreen(
+          return PolishedSelectProviderScreen(
             service: args?['service'] ?? 'consultation',
             specialty: args?['specialty'],
             prix: (args?['prix'] ?? 0).toDouble(),
@@ -138,13 +144,20 @@ class MyApp extends StatelessWidget {
         AppRoutes.waitingAcceptance: (context) {
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
           final requestId = args?['requestId'] as String?;
-          return WaitingForAcceptanceScreen(requestId: requestId ?? '');
+          return PolishedWaitingScreen(requestId: requestId ?? '');
+        },
+        // Legacy/alias route used by older booking flow
+        '/waiting-for-provider': (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final requestId = args?['requestId'] as String?;
+          return PolishedWaitingScreen(requestId: requestId ?? '');
         },
         AppRoutes.tracking: (context) {
-          // Existing tracking screen expects appointmentId via arguments
+          print('🗺️ [Router] /tracking route accessed');
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
           final appointmentId = args?['appointmentId'] as String?;
-          return LiveTrackingScreen(appointmentId: appointmentId); // adjust constructor if needed
+          print('📍 [Router] AppointmentId from arguments: $appointmentId');
+          return LiveTrackingScreen(appointmentId: appointmentId);
         },
         '/profile': (context) => const EnhancedProfileScreen(),
         '/provider-chat': (context) => const ProviderChatScreen(

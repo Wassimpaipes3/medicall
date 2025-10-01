@@ -21,6 +21,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   void initState() {
     super.initState();
     print('🗺️ [LiveTrackingScreen] Initialized with appointmentId: ${widget.appointmentId}');
+    
+    // Check if appointmentId is null or empty
+    if (widget.appointmentId == null || widget.appointmentId!.isEmpty) {
+      print('❌ [LiveTrackingScreen] ERROR: No appointmentId provided!');
+    } else {
+      print('✅ [LiveTrackingScreen] Valid appointmentId: ${widget.appointmentId}');
+    }
+    
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
@@ -38,16 +46,45 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Live Tracking'),
+        title: Text('Live Tracking${widget.appointmentId != null ? ' - ${widget.appointmentId}' : ''}'),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
-        toolbarHeight: 100, // Increased from 74 to 100 for much lower positioning from top
+        toolbarHeight: 100,
+        actions: [
+          if (widget.appointmentId != null)
+            IconButton(
+              icon: const Icon(Icons.info_outline),
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Tracking appointment: ${widget.appointmentId}')),
+                );
+              },
+            ),
+        ],
       ),
-      body: FlutterMapTrackingWidget(
-        appointmentId: widget.appointmentId,
-        showNearbyProviders: widget.appointmentId == null,
-      ),
+      body: widget.appointmentId == null || widget.appointmentId!.isEmpty
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 64, color: Colors.red),
+                  SizedBox(height: 16),
+                  Text(
+                    'No Appointment ID',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    'Cannot load tracking without appointment ID',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ],
+              ),
+            )
+          : FlutterMapTrackingWidget(
+              appointmentId: widget.appointmentId,
+              showNearbyProviders: false,
+            ),
     );
   }
 }

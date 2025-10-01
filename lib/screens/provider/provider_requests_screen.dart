@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../services/provider_request_service.dart';
+import '../../routes/app_routes.dart';
 
 class ProviderRequestsScreen extends StatefulWidget {
   const ProviderRequestsScreen({super.key});
@@ -34,7 +35,7 @@ class _ProviderRequestsScreenState extends State<ProviderRequestsScreen> {
       
       print('🚀 [Provider] Navigating to tracking with appointmentId: $appointmentId');
       // Navigate to tracking (replace so provider can't go back to requests)
-      Navigator.of(context).pushReplacementNamed('/tracking', arguments: {'appointmentId': appointmentId});
+      Navigator.of(context).pushReplacementNamed(AppRoutes.tracking, arguments: {'appointmentId': appointmentId});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

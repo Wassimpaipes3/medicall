@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme.dart';
+import '../../routes/app_routes.dart';
 import '../../services/provider/provider_service.dart';
 import '../../services/notification_service.dart';
 
@@ -560,8 +561,15 @@ class _ProviderAppointmentDetailsScreenState extends State<ProviderAppointmentDe
           ),
         );
 
-        // Navigate back to dashboard
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        // Navigate to tracking instead of going back to dashboard
+        print('🚀 [ProviderAppointmentDetails] Navigating to tracking with appointmentId: ${widget.appointmentId}');
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRoutes.tracking, 
+          (route) => route.isFirst,
+          arguments: {
+            'appointmentId': widget.appointmentId,
+          }
+        );
       }
     } catch (e) {
       if (mounted) {

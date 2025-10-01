@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
+import '../routes/app_routes.dart';
 import '../services/appointment_service.dart';
 import '../services/provider_location_service.dart';
 
@@ -303,7 +304,9 @@ Future<void> handleAppointmentAcceptance(String appointmentId) async {
   
   if (success) {
     // Show success message, navigate to appointment details
-    Navigator.pushNamed(context, '/appointment-tracking');
+    Navigator.pushNamed(context, AppRoutes.tracking, arguments: {
+      'appointmentId': appointmentId,
+    });
   }
 }
 

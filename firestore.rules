@@ -11,7 +11,10 @@ service cloud.firestore {
 
     // === /users: Basic user metadata (role, email, name) ===
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Allow any authenticated user to read basic profile info (for displaying provider names/photos)
+      allow read: if request.auth != null;
+      // Only the user can write to their own document
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
 
     // === /patients: Medical & personal data (sensitive!) ===
@@ -85,14 +88,28 @@ service cloud.firestore {
          resource.data.idpat == request.auth.uid || 
          resource.data.idpro == request.auth.uid);
 
-      allow create: if request.auth != null;
+      // Allow authenticated users (patient or provider) to create appointments
+      allow create: if request.auth != null &&
+        (request.resource.data.idpat == request.auth.uid || 
+         request.resource.data.idpro == request.auth.uid ||
+         request.resource.data.patientId == request.auth.uid ||
+         request.resource.data.professionnelId == request.auth.uid);
 
-      allow update, delete: if request.auth != null
+      // Allow patient or provider to update their own appointments
+      // (for location tracking, status updates, etc.)
+      allow update: if request.auth != null
+        && (resource.data.patientId == request.auth.uid || 
+            resource.data.professionnelId == request.auth.uid ||
+            resource.data.idpat == request.auth.uid || 
+            resource.data.idpro == request.auth.uid);
+      
+      // Only allow deletion if status is pending or cancelled
+      allow delete: if request.auth != null
         && (resource.data.patientId == request.auth.uid || 
             resource.data.professionnelId == request.auth.uid ||
             resource.data.idpat == request.auth.uid || 
             resource.data.idpro == request.auth.uid)
-        && resource.data.status == 'pending'; // Prevent editing confirmed appointments
+        && resource.data.status in ['pending', 'cancelled'];
     }
 
     // === /provider_requests: Pre-appointment provider selection ===

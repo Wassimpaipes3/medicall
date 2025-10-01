@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/theme.dart';
 import '../../routes/app_routes.dart';
 import '../../services/provider/provider_service.dart';
 import '../../widgets/provider/provider_navigation_bar.dart';
+import '../../services/provider_request_service.dart';
 
 class AppointmentManagementScreen extends StatefulWidget {
   const AppointmentManagementScreen({super.key});
@@ -874,27 +877,62 @@ class _AppointmentManagementScreenState extends State<AppointmentManagementScree
     HapticFeedback.mediumImpact();
     
     try {
-      final success = await _providerService.respondToRequest(requestId, accept);
+      // If declining, keep existing local flow
+      if (!accept) {
+        final success = await _providerService.respondToRequest(requestId, false);
+        if (success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Request declined'),
+              backgroundColor: Colors.grey,
+            ),
+          );
+          _loadAppointments();
+        }
+        return;
+      }
+
+      // Accepting: create appointment in Firestore and update provider_requests so the patient stream redirects
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Accepting request...'),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+
+      // Try to get provider current GPS position; fall back to 0,0 if not available
+      Position? pos;
+      try {
+        pos = await Geolocator.getCurrentPosition();
+      } catch (_) {}
+      final providerGeo = GeoPoint(pos?.latitude ?? 0, pos?.longitude ?? 0);
+
+      final appointmentId = await ProviderRequestService.acceptRequestAndCreateAppointment(
+        requestId: requestId,
+        providerLocation: providerGeo,
+      );
       
-      if (success && mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              accept ? 'Request accepted successfully!' : 'Request declined',
-            ),
-            backgroundColor: accept ? const Color(0xFF10B981) : Colors.grey,
+            content: const Text('Request accepted successfully!'),
+            backgroundColor: const Color(0xFF10B981),
           ),
         );
         
         // Refresh the list
         _loadAppointments();
         
-        if (accept) {
-          // Switch to active tab
-          setState(() {
-            _selectedTabIndex = 1;
-          });
-        }
+        // Switch to active tab
+        setState(() {
+          _selectedTabIndex = 1;
+        });
+        
+        // Navigate to tracking with the real appointmentId
+        print('🚀 [AppointmentManagement] Navigating to tracking with appointmentId: $appointmentId');
+        Navigator.of(context).pushNamed(AppRoutes.tracking, arguments: {
+          'appointmentId': appointmentId,
+        });
       }
     } catch (e) {
       if (mounted) {
