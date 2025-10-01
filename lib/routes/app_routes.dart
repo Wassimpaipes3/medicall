@@ -40,6 +40,7 @@ class AppRoutes {
   static const providerEarnings = '/provider-earnings';
   static const providerProfile = '/provider-profile';
   static const providerRequests = '/provider-requests';
+  static const providerIncomingRequests = '/provider-incoming-requests';
   
   // Enhanced Provider Routes
   static const enhancedAppointmentManagement = '/enhanced-appointment-management';

@@ -1237,10 +1237,10 @@ class _PolishedWaitingScreenState extends State<PolishedWaitingScreen>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   bool _isCancelling = false;
+  bool _hasShownDeclinedDialog = false; // Prevent multiple dialogs
 
   // Material 3 Colors
   static const Color _primaryColor = Color(0xFF1976D2);
-  static const Color _successColor = Color(0xFF43A047);
   static const Color _errorColor = Color(0xFFE53935);
   static const Color _backgroundColor = Color(0xFFFAFAFA);
   static const Color _surfaceColor = Color(0xFFFFFFFF);
@@ -1264,6 +1264,87 @@ class _PolishedWaitingScreenState extends State<PolishedWaitingScreen>
   void dispose() {
     _pulseController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleDeclinedRequest(BuildContext context, Map<String, dynamic> data) async {
+    // Prevent showing dialog multiple times
+    if (_hasShownDeclinedDialog) return;
+    _hasShownDeclinedDialog = true;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.cancel_outlined, color: _errorColor, size: 28),
+            SizedBox(width: 12),
+            Text(
+              'Request Declined',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: _textPrimary,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'The provider has declined your request. Please select another available provider to continue.',
+          style: TextStyle(
+            fontSize: 15,
+            color: _textSecondary,
+            height: 1.5,
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop(); // Close dialog
+              
+              // Redirect to select provider screen
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (context) => PolishedSelectProviderScreen(
+                    service: data['service'] ?? 'consultation',
+                    specialty: data['specialty'],
+                    prix: _toDouble(data['prix'], 0),
+                    paymentMethod: data['paymentMethod'] ?? 'Cash',
+                    patientLocation: data['patientLocation'] ?? const GeoPoint(0, 0),
+                  ),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              minimumSize: const Size(double.infinity, 48),
+            ),
+            child: const Text(
+              'Select Another Provider',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _toDouble(dynamic value, double defaultValue) {
+    if (value == null) return defaultValue;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? defaultValue;
+    return defaultValue;
   }
 
   Future<void> _cancelRequest(BuildContext context, Map<String, dynamic> data) async {
@@ -1404,14 +1485,25 @@ class _PolishedWaitingScreenState extends State<PolishedWaitingScreen>
             return _buildErrorState();
           }
 
-          // Check for acceptance and auto-redirect
-          if (data['status'] == 'accepted' && data['appointmentId'] != null) {
+          final status = data['status'] as String?;
+
+          // Check for acceptance and auto-redirect to tracking
+          if (status == 'accepted' && data['appointmentId'] != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (mounted) {
                 Navigator.of(context).pushReplacementNamed(
                   AppRoutes.tracking,
                   arguments: {'appointmentId': data['appointmentId']},
                 );
+              }
+            });
+          }
+
+          // Check for decline and show dialog, then redirect to select provider
+          if (status == 'declined') {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _handleDeclinedRequest(context, data);
               }
             });
           }

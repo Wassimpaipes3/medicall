@@ -162,7 +162,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
     
     try {
       final requestId = await ProviderRequestService.createRequest(
-        providerId: provider.id,
+        providerId: provider.providerAuthId,
         service: widget.service,
         specialty: widget.specialty,
         prix: widget.prix,
@@ -691,6 +691,7 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
 // Provider Data Model
 class ProviderData {
   final String id;
+  final String providerAuthId;
   final String name;
   final String specialty;
   final double rating;
@@ -705,6 +706,7 @@ class ProviderData {
 
   ProviderData({
     required this.id,
+    required this.providerAuthId,
     required this.name,
     required this.specialty,
     required this.rating,
@@ -740,6 +742,7 @@ class ProviderData {
     final isAvailable = disponible == true || disponible == 'true' || disponible == 1 || disponible == '1';
     return ProviderData(
       id: doc.id,
+      providerAuthId: (data['id_user'] ?? data['userId'] ?? doc.id).toString(),
       name: data['login'] ?? data['nom'] ?? 'Healthcare Provider',
       specialty: data['specialite'] ?? data['specialty'] ?? 'General',
       rating: _parseRating(data['rating']),

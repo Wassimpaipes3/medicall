@@ -126,12 +126,12 @@ service cloud.firestore {
           request.resource.data.idpat == request.auth.uid
         );
 
-      // Updates: patient can cancel while pending; provider can accept
+      // Updates: patient can cancel while pending; provider can accept OR decline
       allow update: if request.auth != null && (
         // Patient cancellation
         (resource.data.patientId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.status in ['cancelled','pending']) ||
-        // Provider acceptance
-        (resource.data.providerId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.status == 'accepted')
+        // Provider acceptance or decline
+        (resource.data.providerId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.status in ['accepted', 'declined'])
       );
     }
 

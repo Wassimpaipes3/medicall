@@ -31,6 +31,7 @@ import 'package:firstv/screens/provider/enhanced_appointment_management_screen.d
 import 'package:firstv/screens/booking/polished_select_provider_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firstv/screens/provider/provider_requests_screen.dart';
+import 'package:firstv/screens/provider/provider_incoming_requests_screen.dart';
 // Booking Flow Imports
 import 'package:firstv/widgets/booking/ServiceSelectionPage.dart';
 import 'package:firstv/widgets/booking/AppointmentsPage.dart';
@@ -186,6 +187,9 @@ class MyApp extends StatelessWidget {
         ),
         AppRoutes.providerRequests: (context) => RouteGuard.providerRouteGuard(
           child: const ProviderRequestsScreen(),
+        ),
+        AppRoutes.providerIncomingRequests: (context) => RouteGuard.providerRouteGuard(
+          child: const ProviderIncomingRequestsScreen(),
         ),
         // Enhanced Provider Routes (keeping for compatibility)
         AppRoutes.enhancedProfile: (context) => const ProviderEnhanced.EnhancedProfileScreen(),

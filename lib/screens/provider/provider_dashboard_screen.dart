@@ -933,7 +933,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                 icon: Icons.inbox_outlined,
                 onTap: () {
                   HapticFeedback.lightImpact();
-                  Navigator.pushNamed(context, AppRoutes.providerRequests);
+                  Navigator.pushNamed(context, AppRoutes.providerIncomingRequests);
                 },
               ),
             ),
