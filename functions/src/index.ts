@@ -259,22 +259,56 @@ export const onReviewCreated = functions.firestore
     const patientId = review.idpat;
     const proId = review.idpro;
 
-    // Check for a confirmed appointment between them
+    // Check for a valid appointment between them (confirmed OR completed)
     const querySnapshot = await db.collection("appointments")
       .where("idpat", "==", patientId)
       .where("idpro", "==", proId)
-      .where("etat", "==", "confirmed")
+      .where("status", "in", ["confirmed", "completed", "arrived"]) // Allow reviews for completed appointments
       .limit(1)
       .get();
 
     if (querySnapshot.empty) {
       // ❌ No valid appointment → delete the review
       await snap.ref.delete();
-      console.warn(`❌ Review deleted: No confirmed appointment between ${patientId} and ${proId}`);
+      console.warn(`❌ Review deleted: No valid appointment between ${patientId} and ${proId}`);
       return;
     }
 
     console.log(`✅ Review allowed for professional ${proId}`);
+
+    // 🌟 AUTO-UPDATE PROVIDER RATING
+    try {
+      // Get all reviews for this provider
+      const allReviewsSnapshot = await db.collection("avis")
+        .where("idpro", "==", proId)
+        .get();
+
+      if (!allReviewsSnapshot.empty) {
+        let totalRating = 0;
+        let count = 0;
+
+        allReviewsSnapshot.forEach((doc) => {
+          const reviewData = doc.data();
+          if (reviewData.note && typeof reviewData.note === "number") {
+            totalRating += reviewData.note;
+            count++;
+          }
+        });
+
+        const averageRating = count > 0 ? totalRating / count : 0;
+
+        // Update provider's rating and review count
+        await db.collection("professionals").doc(proId).update({
+          rating: parseFloat(averageRating.toFixed(2)),
+          reviewsCount: count,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        console.log(`✅ Updated provider ${proId}: rating=${averageRating.toFixed(2)}, reviews=${count}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error updating provider rating: ${error}`);
+    }
   });
 
 /**
