@@ -15,6 +15,8 @@ import 'package:firstv/screens/notifications/notifications_screen.dart';
 import 'package:firstv/screens/profile/enhanced_profile_screen.dart';
 import 'package:firstv/screens/chat/provider_chat_screen.dart';
 import 'package:firstv/screens/booking/live_tracking_screen.dart';
+import 'package:firstv/screens/booking/enhanced_live_tracking_screen.dart';
+import 'package:firstv/screens/booking/arrived_confirmation_screen.dart';
 import 'package:firstv/services/notification_service.dart';
 import 'package:firstv/middleware/route_guard.dart';
 // Provider Screens
@@ -32,6 +34,7 @@ import 'package:firstv/screens/booking/polished_select_provider_screen.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firstv/screens/provider/provider_requests_screen.dart';
 import 'package:firstv/screens/provider/provider_incoming_requests_screen.dart';
+import 'package:firstv/screens/rating/rating_screen.dart';
 // Booking Flow Imports
 import 'package:firstv/widgets/booking/ServiceSelectionPage.dart';
 import 'package:firstv/widgets/booking/AppointmentsPage.dart';
@@ -159,6 +162,30 @@ class MyApp extends StatelessWidget {
           final appointmentId = args?['appointmentId'] as String?;
           print('📍 [Router] AppointmentId from arguments: $appointmentId');
           return LiveTrackingScreen(appointmentId: appointmentId);
+        },
+        AppRoutes.ratingScreen: (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          return RatingScreen(
+            appointmentId: args?['appointmentId'] as String? ?? '',
+            providerId: args?['providerId'] as String? ?? '',
+            providerName: args?['providerName'] as String? ?? 'Provider',
+            providerSpecialty: args?['providerSpecialty'] as String? ?? '',
+            providerPhoto: args?['providerPhoto'] as String?,
+          );
+        },
+        AppRoutes.enhancedLiveTracking: (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final appointmentId = args?['appointmentId'] as String?;
+          return EnhancedLiveTrackingScreen(appointmentId: appointmentId);
+        },
+        AppRoutes.arrivedConfirmation: (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          final appointmentId = args?['appointmentId'] as String? ?? '';
+          final appointmentData = args?['appointmentData'] as Map<String, dynamic>? ?? {};
+          return ArrivedConfirmationScreen(
+            appointmentId: appointmentId,
+            appointmentData: appointmentData,
+          );
         },
         '/profile': (context) => const EnhancedProfileScreen(),
         '/provider-chat': (context) => const ProviderChatScreen(

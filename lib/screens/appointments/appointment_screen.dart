@@ -6,6 +6,7 @@ import '../../widgets/booking/ServiceSelectionPage.dart';
 import '../../widgets/booking/ProviderTrackingScreen.dart';
 import '../../widgets/booking/LocationSelectionPage.dart';
 import '../../data/services/appointment_storage.dart';
+import '../../routes/app_routes.dart';
 
 class AppointmentScreen extends StatefulWidget {
   final Map<String, dynamic>? selectedDoctor;
@@ -165,6 +166,21 @@ class _AppointmentScreenState extends State<AppointmentScreen>
           duration: Duration(seconds: 2),
         ),
       );
+      
+      // Navigate to rating screen for patient to rate the provider
+      Future.delayed(const Duration(milliseconds: 500), () {
+        Navigator.pushNamed(
+          context,
+          AppRoutes.ratingScreen,
+          arguments: {
+            'appointmentId': appointment['id'],
+            'providerId': appointment['providerId'] ?? appointment['idpro'],
+            'providerName': appointment['providerName'] ?? appointment['nom'] ?? 'Provider',
+            'providerSpecialty': appointment['specialty'] ?? appointment['specialite'] ?? '',
+            'providerPhoto': appointment['providerPhoto'] ?? appointment['photo_profile'],
+          },
+        );
+      });
       
       // Reload appointments
       _loadAppointments();

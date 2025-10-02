@@ -25,6 +25,9 @@ class AppRoutes {
   static const waitingAcceptance = '/waiting-acceptance';
   static const tracking = '/tracking'; // alias used by waiting screen
   static const providerChat = '/provider-chat';
+  static const ratingScreen = '/rating-screen';
+  static const enhancedLiveTracking = '/enhanced-live-tracking';
+  static const arrivedConfirmation = '/arrived-confirmation';
   
   // Test Routes
   static const firebaseTest = '/firebase-test';
