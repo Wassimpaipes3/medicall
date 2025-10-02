@@ -27,7 +27,7 @@ class RoleTestUtility {
       final userDoc = usersQuery.docs.first;
       final userId = userDoc.id;
       
-      print('👤 Found user: ${userId}');
+      print('👤 Found user: $userId');
 
       // Update user role
       await _firestore.collection('users').doc(userId).update({

@@ -221,7 +221,7 @@ class _EnhancedLiveTrackingScreenState extends State<EnhancedLiveTrackingScreen>
           .collection('appointments')
           .doc(widget.appointmentId)
           .update({
-        'status': 'arrived',
+        'etat': 'arrived',
         'arrivedAt': FieldValue.serverTimestamp(),
       });
 
@@ -321,81 +321,88 @@ class _EnhancedLiveTrackingScreenState extends State<EnhancedLiveTrackingScreen>
       ),
       body: widget.appointmentId == null
           ? _buildErrorView()
-          : Stack(
+          : Column(
               children: [
-                // Map widget (full screen)
-                FlutterMapTrackingWidget(
-                  appointmentId: widget.appointmentId,
-                  showNearbyProviders: false,
-                ),
-                
-                // Debug info (top-left) - Remove in production
-                Positioned(
-                  top: 16,
-                  left: 16,
+                // Map Card (takes most of the space)
+                Expanded(
                   child: Container(
-                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Role: ${_currentUserRole ?? "loading..."}',
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
-                        ),
-                        if (_currentDistance != null)
-                          Text(
-                            'Distance: ${_currentDistance!.toStringAsFixed(0)}m',
-                            style: const TextStyle(color: Colors.white, fontSize: 12),
-                          ),
-                        Text(
-                          'Within 100m: $_isWithin100Meters',
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
-                        ),
-                        Text(
-                          'Patient Loc: ${_patientLat != null ? "✓" : "✗"}',
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
                         ),
                       ],
                     ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Stack(
+                        children: [
+                          // Map widget
+                          FlutterMapTrackingWidget(
+                            appointmentId: widget.appointmentId,
+                            showNearbyProviders: false,
+                          ),
+                          
+                          // Debug info (top-left) - Remove in production
+                          Positioned(
+                            top: 16,
+                            left: 16,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.7),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Role: ${_currentUserRole ?? "loading..."}',
+                                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                                  ),
+                                  if (_currentDistance != null)
+                                    Text(
+                                      'Distance: ${_currentDistance!.toStringAsFixed(0)}m',
+                                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                                    ),
+                                  Text(
+                                    'Within 100m: $_isWithin100Meters',
+                                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                                  ),
+                                  Text(
+                                    'Patient Loc: ${_patientLat != null ? "✓" : "✗"}',
+                                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          
+                          // Distance indicator (top)
+                          if (_currentUserRole == 'provider' && _currentDistance != null)
+                            Positioned(
+                              top: 16,
+                              left: 16,
+                              right: 16,
+                              child: _buildDistanceCard(),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 
-                // Distance indicator (top)
-                if (_currentUserRole == 'provider' && _currentDistance != null)
-                  Positioned(
-                    top: 16,
-                    left: 16,
-                    right: 16,
-                    child: _buildDistanceCard(),
-                  ),
-                
-                // Arrived button (floating above map) - only for provider
+                // Arrived button (below the map card) - only for provider
                 if (_currentUserRole == 'provider')
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 12,
-                            offset: const Offset(0, -4),
-                          ),
-                        ],
-                      ),
-                      child: SafeArea(
-                        top: false,
-                        child: _buildArrivedButton(),
-                      ),
-                    ),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: _buildArrivedButton(),
                   ),
               ],
             ),

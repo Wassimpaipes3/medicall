@@ -16,7 +16,7 @@ class AppColors {
 }
 
 class AppointmentsAnalyticsScreen extends StatefulWidget {
-  const AppointmentsAnalyticsScreen({Key? key}) : super(key: key);
+  const AppointmentsAnalyticsScreen({super.key});
 
   @override
   State<AppointmentsAnalyticsScreen> createState() => _AppointmentsAnalyticsScreenState();

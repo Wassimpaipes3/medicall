@@ -99,16 +99,16 @@ class _RoleDebugScreenState extends State<RoleDebugScreen> {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : () => _testRoleChange('patient'),
-                    child: Text('→ Patient'),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                    child: Text('→ Patient'),
                   ),
                 ),
                 SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : () => _testRoleChange('doctor'),
-                    child: Text('→ Docteur'),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                    child: Text('→ Docteur'),
                   ),
                 ),
               ],
@@ -121,16 +121,16 @@ class _RoleDebugScreenState extends State<RoleDebugScreen> {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : () => _testRoleChange('professional'),
-                    child: Text('→ Professional'),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                    child: Text('→ Professional'),
                   ),
                 ),
                 SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isLoading ? null : () => _testRoleChange('admin'),
-                    child: Text('→ Admin'),
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                    child: Text('→ Admin'),
                   ),
                 ),
               ],
@@ -172,8 +172,8 @@ class _RoleDebugScreenState extends State<RoleDebugScreen> {
             if (_output.isNotEmpty)
               ElevatedButton(
                 onPressed: () => setState(() => _output = ''),
-                child: Text('Clear Output'),
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.grey),
+                child: Text('Clear Output'),
               ),
           ],
         ),

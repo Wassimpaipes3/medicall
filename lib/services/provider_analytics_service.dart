@@ -269,7 +269,7 @@ class ProviderAnalyticsService {
       case AnalyticsPeriod.weekly:
         return 'W${_getWeekOfYear(date)}';
       case AnalyticsPeriod.monthly:
-        return '${_getMonthName(date.month)}';
+        return _getMonthName(date.month);
     }
   }
 

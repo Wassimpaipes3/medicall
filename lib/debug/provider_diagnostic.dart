@@ -270,7 +270,7 @@ class ProviderDiagnostic {
 
   /// Print formatted diagnostic results
   static void printResults(Map<String, dynamic> results) {
-    print('\n' + '='*60);
+    print('\n${'='*60}');
     print('🔍 PROVIDER DIAGNOSTIC RESULTS');
     print('='*60);
     
@@ -285,7 +285,7 @@ class ProviderDiagnostic {
       }
     }
     
-    print('\n' + '='*60);
+    print('\n${'='*60}');
   }
 
   /// Get quick summary of the issue

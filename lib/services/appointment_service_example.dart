@@ -1,5 +1,6 @@
 /// Example usage of the AppointmentService after payment completion
 /// This demonstrates how to integrate the service into your payment workflow
+library;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';

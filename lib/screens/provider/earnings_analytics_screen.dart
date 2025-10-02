@@ -15,7 +15,7 @@ class AppColors {
 }
 
 class EarningsAnalyticsScreen extends StatefulWidget {
-  const EarningsAnalyticsScreen({Key? key}) : super(key: key);
+  const EarningsAnalyticsScreen({super.key});
 
   @override
   State<EarningsAnalyticsScreen> createState() => _EarningsAnalyticsScreenState();

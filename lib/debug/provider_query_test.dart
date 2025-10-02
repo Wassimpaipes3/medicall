@@ -36,8 +36,9 @@ class ProviderQueryTest {
       
       for (final doc in allDisponible.docs) {
         final disponible = doc.data()['disponible'];
-        if (disponible == true) trueCount++;
-        else if (disponible == false) falseCount++;
+        if (disponible == true) {
+          trueCount++;
+        } else if (disponible == false) falseCount++;
         else nullCount++;
       }
       

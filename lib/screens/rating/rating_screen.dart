@@ -113,6 +113,8 @@ class _RatingScreenState extends State<RatingScreen> with SingleTickerProviderSt
 
       if (!mounted) return;
 
+      print('❌ [RatingScreen] Error submitting review: $e');
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -121,8 +123,10 @@ class _RatingScreenState extends State<RatingScreen> with SingleTickerProviderSt
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Failed to submit review: $e',
+                  'Failed to submit review: ${e.toString()}',
                   style: const TextStyle(fontSize: 14),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -132,6 +136,7 @@ class _RatingScreenState extends State<RatingScreen> with SingleTickerProviderSt
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
+          duration: const Duration(seconds: 5),
         ),
       );
     }

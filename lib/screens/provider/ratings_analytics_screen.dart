@@ -15,7 +15,7 @@ class AppColors {
 }
 
 class RatingsAnalyticsScreen extends StatefulWidget {
-  const RatingsAnalyticsScreen({Key? key}) : super(key: key);
+  const RatingsAnalyticsScreen({super.key});
 
   @override
   State<RatingsAnalyticsScreen> createState() => _RatingsAnalyticsScreenState();

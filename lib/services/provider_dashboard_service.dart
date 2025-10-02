@@ -131,7 +131,7 @@ class ProviderDashboardService {
           .get();
 
       return pendingAppointments.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         return AppointmentRequest.fromFirestore(doc.id, data);
       }).toList();
 
@@ -161,7 +161,7 @@ class ProviderDashboardService {
 
       double monthlyEarnings = 0;
       for (var appointment in monthlyAppointments.docs) {
-        final data = appointment.data() as Map<String, dynamic>;
+        final data = appointment.data();
         final tarif = (data['tarif'] as num?)?.toDouble() ?? 100.0;
         monthlyEarnings += tarif;
       }
@@ -210,7 +210,7 @@ class DashboardStats {
 
   @override
   String toString() {
-    return 'DashboardStats(earnings: \$${todayEarnings}, completed: $completedTasks, pending: $pendingTasks, rating: ${averageRating.toStringAsFixed(1)})';
+    return 'DashboardStats(earnings: \$$todayEarnings, completed: $completedTasks, pending: $pendingTasks, rating: ${averageRating.toStringAsFixed(1)})';
   }
 }
 

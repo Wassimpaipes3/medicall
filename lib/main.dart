@@ -157,11 +157,11 @@ class MyApp extends StatelessWidget {
           return PolishedWaitingScreen(requestId: requestId ?? '');
         },
         AppRoutes.tracking: (context) {
-          print('🗺️ [Router] /tracking route accessed');
+          print('🗺️ [Router] /tracking route accessed - redirecting to EnhancedLiveTrackingScreen');
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
           final appointmentId = args?['appointmentId'] as String?;
           print('📍 [Router] AppointmentId from arguments: $appointmentId');
-          return LiveTrackingScreen(appointmentId: appointmentId);
+          return EnhancedLiveTrackingScreen(appointmentId: appointmentId);
         },
         AppRoutes.ratingScreen: (context) {
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;

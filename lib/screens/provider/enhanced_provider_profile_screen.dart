@@ -126,7 +126,7 @@ class _EnhancedProviderProfileScreenState extends State<EnhancedProviderProfileS
       }
     } catch (e) {
       print('❌ Error loading legacy provider data: $e');
-      throw e;
+      rethrow;
     }
   }
 
@@ -147,7 +147,7 @@ class _EnhancedProviderProfileScreenState extends State<EnhancedProviderProfileS
       }
     } catch (e) {
       print('❌ Error loading provider profile: $e');
-      throw e;
+      rethrow;
     }
   }
   

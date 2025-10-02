@@ -4,7 +4,7 @@ import '../../services/auth_service.dart';
 import '../../data/models/provider_profile.dart';
 
 class ProviderAuthTestScreen extends StatefulWidget {
-  const ProviderAuthTestScreen({Key? key}) : super(key: key);
+  const ProviderAuthTestScreen({super.key});
 
   @override
   _ProviderAuthTestScreenState createState() => _ProviderAuthTestScreenState();
@@ -177,10 +177,10 @@ class _ProviderAuthTestScreenState extends State<ProviderAuthTestScreen> {
                           _testResults = '';
                         });
                       },
-                      child: Text('Clear Results'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.grey,
                       ),
+                      child: Text('Clear Results'),
                     ),
                   ],
                 ),

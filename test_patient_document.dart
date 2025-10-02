@@ -1,5 +1,6 @@
 /// Test script to verify patient document structure
 /// This is a documentation file showing the expected vs unwanted structure
+library;
 
 /*
 ❌ UNWANTED STRUCTURE (what was happening before):

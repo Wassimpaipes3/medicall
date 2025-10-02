@@ -373,7 +373,7 @@ class AppointmentService {
         throw Exception('You can only accept appointments assigned to you.');
       }
 
-      print('🏥 Provider ${providerId} accepting appointment: $appointmentId');
+      print('🏥 Provider $providerId accepting appointment: $appointmentId');
       print('📍 Provider location: ${providerLocation.latitude}, ${providerLocation.longitude}');
 
       // Update the appointment with provider info

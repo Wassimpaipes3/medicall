@@ -6,6 +6,82 @@ class ReviewService {
   static final _firestore = FirebaseFirestore.instance;
   static final _auth = FirebaseAuth.instance;
 
+  /// DEBUG: List all documents in avis collection
+  static Future<void> listAllReviews() async {
+    try {
+      print('📋 [ReviewService] Listing all documents in avis collection...');
+      print('   Firestore instance: $_firestore');
+      print('   App name: ${_firestore.app.name}');
+      print('   Project ID: ${_firestore.app.options.projectId}');
+      
+      final snapshot = await _firestore.collection('avis').get();
+      
+      print('   Total documents: ${snapshot.docs.length}');
+      
+      if (snapshot.docs.isEmpty) {
+        print('   ⚠️ Collection is EMPTY or documents were deleted');
+      } else {
+        for (var doc in snapshot.docs) {
+          print('   - Document ID: ${doc.id}');
+          print('     Data: ${doc.data()}');
+        }
+      }
+    } catch (e) {
+      print('❌ Error listing reviews: $e');
+    }
+  }
+
+  /// DEBUG: Complete diagnostic
+  static Future<void> runDiagnostics() async {
+    print('🔧 [ReviewService] Running complete diagnostics...');
+    print('═══════════════════════════════════════════════════');
+    
+    // 1. Check authentication
+    final user = _auth.currentUser;
+    print('1️⃣ Authentication:');
+    print('   Logged in: ${user != null}');
+    print('   User ID: ${user?.uid ?? "N/A"}');
+    print('   Email: ${user?.email ?? "N/A"}');
+    print('');
+    
+    // 2. Check Firestore connection
+    print('2️⃣ Firestore Configuration:');
+    print('   Project ID: ${_firestore.app.options.projectId}');
+    print('   App name: ${_firestore.app.name}');
+    print('');
+    
+    // 3. List all collections
+    print('3️⃣ Checking avis collection...');
+    await listAllReviews();
+    print('');
+    
+    // 4. Try to create a test document
+    if (user != null) {
+      print('4️⃣ Testing document creation...');
+      try {
+        final testDoc = await _firestore.collection('avis').add({
+          'test': true,
+          'timestamp': FieldValue.serverTimestamp(),
+          'userId': user.uid,
+        });
+        print('   ✅ Test document created: ${testDoc.id}');
+        
+        // Verify it exists
+        final verify = await _firestore.collection('avis').doc(testDoc.id).get();
+        print('   ✅ Test document verified: ${verify.exists}');
+        
+        // Delete test document
+        await testDoc.delete();
+        print('   ✅ Test document deleted');
+      } catch (e) {
+        print('   ❌ Test failed: $e');
+      }
+    }
+    
+    print('═══════════════════════════════════════════════════');
+    print('🔧 Diagnostics complete');
+  }
+
   /// Submit a new review for a provider
   /// Updates provider's average rating automatically
   static Future<void> submitReview({
@@ -18,9 +94,11 @@ class ReviewService {
     if (user == null) throw Exception('User not authenticated');
 
     print('⭐ [ReviewService] Submitting review');
+    print('   👤 User ID: ${user.uid}');
     print('   🩺 Provider ID: $providerId');
+    print('   📋 Appointment ID: $appointmentId');
     print('   ⭐ Rating: $rating stars');
-    print('   💬 Comment: ${comment ?? "(none)"}');
+    print('   💬 Comment: ${comment ?? "(empty)"}');
 
     try {
       // Create review document
@@ -33,15 +111,50 @@ class ReviewService {
         'createdAt': FieldValue.serverTimestamp(),
       };
 
-      await _firestore.collection('avis').add(reviewData);
-      print('✅ Review saved to avis collection');
+      print('📤 [ReviewService] Attempting to write to Firestore...');
+      print('   Collection: avis');
+      print('   Data keys: ${reviewData.keys.toList()}');
+      print('   Data: $reviewData');
+      
+      try {
+        final docRef = await _firestore.collection('avis').add(reviewData);
+        print('✅ Review saved to avis collection with ID: ${docRef.id}');
+        
+        // VERIFY: Read back the document to confirm it exists
+        print('🔍 [ReviewService] Verifying document was saved...');
+        await Future.delayed(const Duration(milliseconds: 500)); // Wait for Firestore to sync
+        
+        final verifyDoc = await _firestore.collection('avis').doc(docRef.id).get();
+        if (verifyDoc.exists) {
+          print('✅ VERIFIED: Document exists in Firestore');
+          print('   Document ID: ${verifyDoc.id}');
+          print('   Document data: ${verifyDoc.data()}');
+        } else {
+          print('❌ WARNING: Document not found after creation!');
+          print('   This could indicate a database configuration issue');
+        }
+        
+      } catch (firestoreError) {
+        print('❌ Firestore write error: $firestoreError');
+        print('   Error type: ${firestoreError.runtimeType}');
+        if (firestoreError.toString().contains('PERMISSION_DENIED')) {
+          print('   ⚠️ PERMISSION DENIED - Check Firestore rules for /avis collection');
+        }
+        rethrow;
+      }
 
+      // DEBUG: List all reviews to verify it's really there
+      print('📋 [ReviewService] Listing all reviews after save...');
+      await listAllReviews();
+      
       // Update provider's rating
+      print('🔄 [ReviewService] Updating provider rating...');
       await _updateProviderRating(providerId);
       
       print('✅ Review submission complete');
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('❌ Failed to submit review: $e');
+      print('   Stack trace: $stackTrace');
       rethrow;
     }
   }
@@ -49,25 +162,30 @@ class ReviewService {
   /// Recalculate and update provider's average rating
   static Future<void> _updateProviderRating(String providerId) async {
     try {
-      print('🔄 [ReviewService] Updating provider rating...');
+      print('🔄 [ReviewService] _updateProviderRating called for provider: $providerId');
 
       // Get all reviews for this provider
+      print('📥 [ReviewService] Fetching reviews for provider...');
       final reviewsSnapshot = await _firestore
           .collection('avis')
           .where('idpro', isEqualTo: providerId)
           .get();
 
+      print('📊 [ReviewService] Found ${reviewsSnapshot.docs.length} reviews');
+
       if (reviewsSnapshot.docs.isEmpty) {
-        print('⚠️ No reviews found for provider');
+        print('⚠️ No reviews found for provider - skipping rating update');
         return;
       }
 
       // Calculate average rating
       final reviews = reviewsSnapshot.docs;
       double totalRating = 0;
+      print('🧮 [ReviewService] Calculating average...');
       for (final doc in reviews) {
         final data = doc.data();
         final note = data['note'];
+        print('   Review ${doc.id}: note = $note');
         if (note is int) {
           totalRating += note.toDouble();
         } else if (note is double) {
@@ -78,25 +196,40 @@ class ReviewService {
       final averageRating = totalRating / reviews.length;
       final reviewsCount = reviews.length;
 
-      print('📊 Calculated: $averageRating stars from $reviewsCount reviews');
+      print('📊 Calculated average: ${averageRating.toStringAsFixed(1)} stars from $reviewsCount reviews');
 
       // Update provider document
       // Try both 'professionals' collection with different ID patterns
+      print('🔍 [ReviewService] Searching for provider in professionals collection...');
+      
       final providerQueries = [
         _firestore.collection('professionals').where('idpro', isEqualTo: providerId).limit(1),
         _firestore.collection('professionals').where('id_user', isEqualTo: providerId).limit(1),
       ];
 
       bool updated = false;
+      int queryIndex = 0;
       for (final query in providerQueries) {
+        queryIndex++;
+        print('   Query $queryIndex: ${queryIndex == 1 ? "idpro" : "id_user"} == $providerId');
+        
         final snapshot = await query.get();
+        print('   Found ${snapshot.docs.length} documents');
+        
         if (snapshot.docs.isNotEmpty) {
           final docId = snapshot.docs.first.id;
+          final docData = snapshot.docs.first.data();
+          print('   ✅ Found provider document: $docId');
+          print('   Current data: $docData');
+          
+          print('📝 [ReviewService] Updating provider rating...');
           await _firestore.collection('professionals').doc(docId).update({
             'rating': double.parse(averageRating.toStringAsFixed(1)),
             'reviewsCount': reviewsCount,
           });
-          print('✅ Provider rating updated: $averageRating ($reviewsCount reviews)');
+          print('✅ Provider rating updated successfully!');
+          print('   New rating: ${averageRating.toStringAsFixed(1)}');
+          print('   Reviews count: $reviewsCount');
           updated = true;
           break;
         }
