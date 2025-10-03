@@ -312,7 +312,107 @@ export const onReviewCreated = functions.firestore
   });
 
 /**
- * 4. Send reminder 1 hour before appointment
+ * 4. Clean up expired provider requests (backup for Firestore TTL)
+ *    Runs every 5 minutes to delete documents with expireAt < now
+ */
+export const cleanupExpiredRequests = functions.pubsub
+  .schedule("every 5 minutes")
+  .onRun(async () => {
+    const now = admin.firestore.Timestamp.now();
+
+    try {
+      // Find all requests where expireAt is in the past
+      const expiredSnapshot = await db.collection("provider_requests")
+        .where("expireAt", "<=", now)
+        .get();
+
+      if (expiredSnapshot.empty) {
+        console.log("🧹 No expired provider requests to clean up");
+        return;
+      }
+
+      // Delete expired requests in batch
+      const batch = db.batch();
+      expiredSnapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      await batch.commit();
+      console.log(`✅ Deleted ${expiredSnapshot.size} expired provider requests`);
+    } catch (error) {
+      console.error("❌ Error cleaning up expired requests:", error);
+    }
+  });
+
+/**
+ * 4b. ONE-TIME MIGRATION: Add expireAt to existing provider_requests
+ *     This is a manual trigger function to add expireAt field to documents
+ *     that were created before we implemented auto-deletion.
+ *
+ *     Call this once to fix old documents:
+ *     https://REGION-PROJECT_ID.cloudfunctions.net/migrateProviderRequestsExpireAt
+ */
+export const migrateProviderRequestsExpireAt = functions.https.onRequest(async (req, res) => {
+  try {
+    console.log("🔧 Starting expireAt migration...");
+
+    const snapshot = await db.collection("provider_requests").get();
+
+    if (snapshot.empty) {
+      console.log("📭 No documents found");
+      res.json({success: true, updated: 0, message: "No documents to migrate"});
+      return;
+    }
+
+    console.log(`📊 Found ${snapshot.size} documents`);
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+    const batch = db.batch();
+
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data();
+
+      // Skip if already has expireAt
+      if (data.expireAt) {
+        skippedCount++;
+        return;
+      }
+
+      // Add expireAt: 1 minute from now (old docs will be deleted quickly)
+      const expireAt = admin.firestore.Timestamp.fromDate(
+        new Date(Date.now() + 1 * 60 * 1000) // 1 minute
+      );
+
+      batch.update(doc.ref, {
+        expireAt: expireAt,
+        migratedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      updatedCount++;
+      console.log(`✏️ Adding expireAt to ${doc.id}`);
+    });
+
+    if (updatedCount > 0) {
+      await batch.commit();
+      console.log(`✅ Migration complete! Updated ${updatedCount} documents`);
+    }
+
+    res.json({
+      success: true,
+      updated: updatedCount,
+      skipped: skippedCount,
+      total: snapshot.size,
+      message: `Migration complete: ${updatedCount} updated, ${skippedCount} skipped`,
+    });
+  } catch (error) {
+    console.error("❌ Migration failed:", error);
+    res.status(500).json({success: false, error: String(error)});
+  }
+});
+
+/**
+ * 5. Send reminder 1 hour before appointment
  *    Runs every 15 minutes to catch upcoming visits
  */
 export const sendAppointmentReminder = functions.pubsub
@@ -365,7 +465,93 @@ export const sendAppointmentReminder = functions.pubsub
   });
 
 /**
- * 5. When a user deletes their account → clean up related data
+ * 6. Manual cleanup of EXPIRED provider_requests only (safe cleanup)
+ *    Call this to clean up old documents without expireAt field
+ *    New documents with expireAt will be preserved if not expired yet
+ */
+export const manualCleanupProviderRequests = functions.https.onCall(async (data, context) => {
+  // Ensure the user is authenticated (optional - remove if you want public access)
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be logged in");
+  }
+
+  console.log("🧹 Manual cleanup triggered by user:", context.auth.uid);
+
+  try {
+    const now = admin.firestore.Timestamp.now();
+
+    // Get ALL documents
+    const allDocs = await db.collection("provider_requests").get();
+
+    if (allDocs.empty) {
+      console.log("✅ No provider_requests to clean");
+      return {success: true, deleted: 0, message: "Collection already empty"};
+    }
+
+    console.log(`📊 Found ${allDocs.size} total documents`);
+
+    // Filter: Delete if (1) no expireAt field OR (2) expireAt is expired
+    const docsToDelete: FirebaseFirestore.DocumentSnapshot[] = [];
+
+    allDocs.docs.forEach((doc) => {
+      const data = doc.data();
+      const expireAt = data.expireAt;
+
+      // Delete if: no expireAt (old document) OR expireAt is in the past
+      if (!expireAt || expireAt <= now) {
+        docsToDelete.push(doc);
+      }
+    });
+
+    if (docsToDelete.length === 0) {
+      console.log("✅ No expired documents to delete");
+      return {
+        success: true,
+        deleted: 0,
+        message: "No expired documents found",
+      };
+    }
+
+    console.log(`🗑️ Deleting ${docsToDelete.length} expired documents...`);
+
+    // Delete in batches of 500 (Firestore limit)
+    const batchSize = 500;
+    let deleted = 0;
+
+    for (let i = 0; i < docsToDelete.length; i += batchSize) {
+      const batch = db.batch();
+      const batchDocs = docsToDelete.slice(i, i + batchSize);
+
+      batchDocs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      await batch.commit();
+      deleted += batchDocs.length;
+      console.log(`✅ Deleted ${deleted}/${docsToDelete.length} expired documents...`);
+    }
+
+    const preserved = allDocs.size - deleted;
+    console.log(`🎉 Cleanup complete! Deleted ${deleted}, Preserved ${preserved} active documents`);
+
+    return {
+      success: true,
+      deleted: deleted,
+      preserved: preserved,
+      message: `Deleted ${deleted} expired documents, preserved ${preserved} active ones`,
+    };
+  } catch (error: unknown) {
+    console.error("❌ Error during manual cleanup:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    throw new functions.https.HttpsError(
+      "internal",
+      `Cleanup failed: ${errorMessage}`,
+    );
+  }
+});
+
+/**
+ * 7. When a user deletes their account → clean up related data
  *    Trigger this manually or via Auth onDelete trigger
  */
 export const cleanupUserData = functions.https.onCall(async (data, context) => {
@@ -400,7 +586,7 @@ export const cleanupUserData = functions.https.onCall(async (data, context) => {
 });
 
 /**
- * 6. Sign up new users (patients only)
+ * 8. Sign up new users (patients only)
  */
 export const signUpUser = functions.https.onCall(async (data) => {
   const {email, password, nom, prenom, telephone} = data;
@@ -449,7 +635,7 @@ export const signUpUser = functions.https.onCall(async (data) => {
 });
 
 /**
- * 7. Sign in users (all roles)
+ * 9. Sign in users (all roles)
  */
 export const signInUser = functions.https.onCall(async (data) => {
   const {email, password} = data;
@@ -516,7 +702,7 @@ export const signInUser = functions.https.onCall(async (data) => {
 });
 
 /**
- * 8. Get user role and profile data
+ * 10. Get user role and profile data
  */
 export const getUserRole = functions.https.onCall(async (data, context) => {
   // Ensure the user is authenticated
