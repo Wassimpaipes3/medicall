@@ -92,6 +92,10 @@ class ProviderRequestService {
     print('   💰 prix: $prix  paymentMethod: $paymentMethod');
     print('   📍 patientLocation: ${patientLocation.latitude}, ${patientLocation.longitude}');
 
+    // Calculate expireAt: 10 minutes from now
+    final now = DateTime.now();
+    final expireAt = Timestamp.fromDate(now.add(const Duration(minutes: 10)));
+
     final data = {
       'patientId': user.uid,
       'idpat': user.uid, // duplicate for legacy rule compatibility
@@ -105,6 +109,7 @@ class ProviderRequestService {
       'appointmentId': null,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
+      'expireAt': expireAt, // ⏰ Auto-delete after 10 minutes (Firestore TTL)
     };
 
     try {

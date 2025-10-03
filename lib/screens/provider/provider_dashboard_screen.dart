@@ -340,6 +340,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         },
         hasNotification: _pendingRequests.isNotEmpty,
       ),
+      // ✅ Cleanup button removed - collection will auto-recreate when needed
     );
   }
 

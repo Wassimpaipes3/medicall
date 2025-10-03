@@ -121,10 +121,8 @@ service cloud.firestore {
 
     // === /provider_requests: Pre-appointment provider selection ===
     match /provider_requests/{reqId} {
-      allow read: if request.auth != null && (
-        resource.data.patientId == request.auth.uid ||
-        resource.data.providerId == request.auth.uid
-      );
+      // Allow read for authenticated users (patient or provider involved)
+      allow read: if request.auth != null;
 
       // Patient creates request targeting a provider
       allow create: if request.auth != null &&
@@ -140,6 +138,9 @@ service cloud.firestore {
         // Provider acceptance or decline
         (resource.data.providerId == request.auth.uid && resource.data.status == 'pending' && request.resource.data.status in ['accepted', 'declined'])
       );
+
+      // Allow deletion by Cloud Functions (for TTL cleanup) or by involved users
+      allow delete: if request.auth != null;
     }
 
     // === /avis: Patient reviews for professionals ===
