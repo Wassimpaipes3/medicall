@@ -1238,6 +1238,7 @@ class _PolishedWaitingScreenState extends State<PolishedWaitingScreen>
   late Animation<double> _pulseAnimation;
   bool _isCancelling = false;
   bool _hasShownDeclinedDialog = false; // Prevent multiple dialogs
+  bool _hasShownExpiredDialog = false; // Prevent multiple expired dialogs
 
   // Material 3 Colors
   static const Color _primaryColor = Color(0xFF1976D2);
@@ -1480,9 +1481,78 @@ class _PolishedWaitingScreenState extends State<PolishedWaitingScreen>
             );
           }
           
+          // Check if document doesn't exist (deleted/expired)
+          if (!snapshot.data!.exists) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _showExpiredDialog(context, {});
+              }
+            });
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.access_time_filled, size: 80, color: _errorColor),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Request Expired',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: _textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'The request has been removed',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          
           final data = snapshot.data!.data() as Map<String, dynamic>?;
           if (data == null) {
             return _buildErrorState();
+          }
+
+          // Check if request has expired based on expireAt timestamp
+          final expireAt = data['expireAt'] as Timestamp?;
+          if (expireAt != null && expireAt.toDate().isBefore(DateTime.now())) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _showExpiredDialog(context, data);
+              }
+            });
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.access_time_filled, size: 80, color: _errorColor),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Request Expired',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: _textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'The 10-minute timeout has passed',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            );
           }
 
           final status = data['status'] as String?;
@@ -1810,6 +1880,96 @@ class _PolishedWaitingScreenState extends State<PolishedWaitingScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Show expired request dialog (Material 3 style)
+  Future<void> _showExpiredDialog(BuildContext context, Map<String, dynamic> data) async {
+    // Prevent showing dialog multiple times
+    if (_hasShownExpiredDialog) return;
+    _hasShownExpiredDialog = true;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.access_time_filled, color: _errorColor, size: 28),
+            SizedBox(width: 12),
+            Text(
+              '⏰ Request Expired',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: _textPrimary,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Your request has expired. Please try again with another provider.',
+          style: TextStyle(
+            fontSize: 15,
+            color: _textSecondary,
+            height: 1.5,
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop(); // Close dialog
+              // Stay on current screen (idle)
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: _textSecondary,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop(); // Close dialog
+              
+              // Redirect to select provider screen
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (context) => PolishedSelectProviderScreen(
+                    service: data['service'] ?? 'consultation',
+                    specialty: data['specialty'],
+                    prix: _toDouble(data['prix'], 0),
+                    paymentMethod: data['paymentMethod'] ?? 'Cash',
+                    patientLocation: data['patientLocation'] ?? const GeoPoint(0, 0),
+                  ),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Try Again',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

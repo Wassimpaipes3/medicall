@@ -38,7 +38,6 @@ class _SelectProviderScreenState extends State<SelectProviderScreen> {
   // UI Colors
   static const Color _primaryColor = Color(0xFF1976D2);
   static const Color _successColor = Color(0xFF43A047);
-  static const Color _errorColor = Color(0xFFE53935);
 
   @override
   void initState() {
@@ -1047,13 +1046,20 @@ class ProviderDetailsModal extends StatelessWidget {
 }
 
 // Waiting for Acceptance Screen
-class WaitingForAcceptanceScreen extends StatelessWidget {
+class WaitingForAcceptanceScreen extends StatefulWidget {
   final String requestId;
   
   const WaitingForAcceptanceScreen({
     super.key, 
     required this.requestId,
   });
+
+  @override
+  State<WaitingForAcceptanceScreen> createState() => _WaitingForAcceptanceScreenState();
+}
+
+class _WaitingForAcceptanceScreenState extends State<WaitingForAcceptanceScreen> {
+  bool _hasShownExpiredDialog = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1075,16 +1081,55 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
       body: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance
             .collection('provider_requests')
-            .doc(requestId)
+            .doc(widget.requestId)
             .snapshots(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
           
+          // Check if document doesn't exist (deleted/expired)
+          if (!snapshot.data!.exists) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                _showExpiredDialog(context, {});
+              }
+            });
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.access_time_filled, size: 64, color: Color(0xFFE53935)),
+                  SizedBox(height: 16),
+                  Text('Request Expired', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            );
+          }
+          
           final data = snapshot.data!.data() as Map<String, dynamic>?;
           if (data == null) {
             return const Center(child: Text('Request not found'));
+          }
+          
+          // Check if request has expired based on expireAt timestamp
+          final expireAt = data['expireAt'] as Timestamp?;
+          if (expireAt != null && expireAt.toDate().isBefore(DateTime.now())) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                _showExpiredDialog(context, data);
+              }
+            });
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.access_time_filled, size: 64, color: Color(0xFFE53935)),
+                  SizedBox(height: 16),
+                  Text('Request Expired', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            );
           }
 
           // Debug logging
@@ -1298,7 +1343,7 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
                         ),
                       );
                       if (confirm == true) {
-                        try { await ProviderRequestService.cancelRequest(requestId); } catch (_) {}
+                        try { await ProviderRequestService.cancelRequest(widget.requestId); } catch (_) {}
                         if (context.mounted) {
                           Navigator.of(context).pushReplacementNamed(AppRoutes.selectProvider, arguments: {
                             'service': data['service'] ?? 'consultation',
@@ -1322,6 +1367,96 @@ class WaitingForAcceptanceScreen extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+
+  /// Show expired request dialog
+  Future<void> _showExpiredDialog(BuildContext context, Map<String, dynamic> data) async {
+    // Prevent showing dialog multiple times
+    if (_hasShownExpiredDialog) return;
+    _hasShownExpiredDialog = true;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.access_time_filled, color: Color(0xFFE53935), size: 28),
+            SizedBox(width: 12),
+            Text(
+              '⏰ Request Expired',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF263238),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Your request has expired. Please try again with another provider.',
+          style: TextStyle(
+            fontSize: 15,
+            color: Color(0xFF546E7A),
+            height: 1.5,
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop(); // Close dialog
+              // Stay on current screen (idle)
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.grey[700],
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop(); // Close dialog
+              
+              // Redirect to select provider screen
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (context) => SelectProviderScreen(
+                    service: data['service'] ?? 'consultation',
+                    specialty: data['specialty'],
+                    prix: (data['prix'] ?? 0).toDouble(),
+                    paymentMethod: data['paymentMethod'] ?? 'Cash',
+                    patientLocation: data['patientLocation'] ?? const GeoPoint(0, 0),
+                  ),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1976D2),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Try Again',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
