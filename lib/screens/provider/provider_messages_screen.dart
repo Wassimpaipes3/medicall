@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
 import '../../routes/app_routes.dart';
 import '../../services/provider/provider_service.dart';
@@ -17,6 +19,8 @@ class ProviderMessagesScreen extends StatefulWidget {
 class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
     with TickerProviderStateMixin {
   final ProviderService _providerService = ProviderService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   
   late AnimationController _slideController;
   late Animation<Offset> _slideAnimation;
@@ -29,7 +33,7 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
   void initState() {
     super.initState();
     _initializeAnimations();
-    _loadConversations();
+    _loadConversationsFromFirestore();
   }
 
   void _initializeAnimations() {
@@ -55,10 +59,169 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
     super.dispose();
   }
 
-  Future<void> _loadConversations() async {
+  Future<void> _loadConversationsFromFirestore() async {
+    try {
+      print('🔵 MESSAGES SCREEN: Loading conversations from Firestore...');
+      setState(() {
+        _isLoading = true;
+      });
+
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        print('❌ MESSAGES SCREEN: No authenticated user!');
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final providerId = currentUser.uid;
+      print('👤 MESSAGES SCREEN: Provider ID: $providerId');
+
+      // Get all chats where current provider is a participant
+      print('🔍 MESSAGES SCREEN: Querying chats collection...');
+      print('   Query: participants arrayContains $providerId');
+      final chatsQuery = await _firestore
+          .collection('chats')
+          .where('participants', arrayContains: providerId)
+          .orderBy('lastTimestamp', descending: true)
+          .get();
+
+      print('📊 MESSAGES SCREEN: Found ${chatsQuery.docs.length} chat documents');
+
+      List<Map<String, dynamic>> loadedConversations = [];
+
+      for (var chatDoc in chatsQuery.docs) {
+        print('\n📄 MESSAGES SCREEN: Processing chat: ${chatDoc.id}');
+        final chatData = chatDoc.data();
+        final participants = List<String>.from(chatData['participants'] ?? []);
+        print('   Participants: $participants');
+        
+        // Get the other participant (the patient)
+        final patientId = participants.firstWhere(
+          (id) => id != providerId,
+          orElse: () => '',
+        );
+
+        print('   Patient ID: $patientId');
+        if (patientId.isEmpty) {
+          print('   ⚠️ Skipping: No patient ID found');
+          continue;
+        }
+
+        // Try to get patient info from patients collection
+        DocumentSnapshot? patientDoc;
+        try {
+          print('   🔍 Looking for patient in patients collection...');
+          patientDoc = await _firestore
+              .collection('patients')
+              .doc(patientId)
+              .get();
+        } catch (e) {
+          // If not found, try professionals collection (for testing)
+          try {
+            print('   🔍 Looking for patient in professionals collection...');
+            patientDoc = await _firestore
+                .collection('professionals')
+                .doc(patientId)
+                .get();
+          } catch (e) {
+            print('   ❌ Error getting patient data: $e');
+            continue;
+          }
+        }
+
+        if (!patientDoc.exists) {
+          print('   ⚠️ Patient document does not exist');
+          continue;
+        }
+
+        final patientData = patientDoc.data() as Map<String, dynamic>?;
+        if (patientData == null) {
+          print('   ⚠️ Patient data is null');
+          continue;
+        }
+
+        print('   ✅ Patient found: ${patientData['name'] ?? patientData['fullName']}');
+
+        // Get unread message count
+        print('   📬 Counting unread messages...');
+        final messagesQuery = await _firestore
+            .collection('chats')
+            .doc(chatDoc.id)
+            .collection('messages')
+            .where('senderId', isEqualTo: patientId)
+            .where('seen', isEqualTo: false)
+            .get();
+
+        final unreadCount = messagesQuery.docs.length;
+        print('   📊 Unread messages: $unreadCount');
+
+        // Format timestamp
+        final lastTimestamp = (chatData['lastTimestamp'] as Timestamp?)?.toDate();
+        String timeString = 'No messages';
+        if (lastTimestamp != null) {
+          final now = DateTime.now();
+          final difference = now.difference(lastTimestamp);
+
+          if (difference.inMinutes < 1) {
+            timeString = 'Just now';
+          } else if (difference.inHours < 1) {
+            timeString = '${difference.inMinutes}m ago';
+          } else if (difference.inDays < 1) {
+            timeString = '${lastTimestamp.hour}:${lastTimestamp.minute.toString().padLeft(2, '0')}';
+          } else if (difference.inDays < 2) {
+            timeString = 'Yesterday';
+          } else if (difference.inDays < 7) {
+            timeString = '${difference.inDays}d ago';
+          } else {
+            timeString = '${lastTimestamp.day}/${lastTimestamp.month}/${lastTimestamp.year}';
+          }
+        }
+
+        final conversationData = {
+          'id': patientId,
+          'userId': patientId,  // For ComprehensiveProviderChatScreen
+          'patientId': patientId,  // For ComprehensiveProviderChatScreen
+          'patientName': patientData['name'] ?? patientData['fullName'] ?? 'Patient',
+          'patientAvatar': patientData['profileImage'] ?? patientData['avatar'],
+          'lastMessage': chatData['lastMessage'] ?? 'No messages yet',
+          'lastMessageTime': timeString,
+          'unreadCount': unreadCount,
+          'isOnline': patientData['isOnline'] ?? false,
+          'serviceType': patientData['lastServiceType'] ?? 'General Care',
+          'status': 'active',
+          'timestamp': lastTimestamp ?? DateTime.now(),
+        };
+        
+        print('   ✅ Added conversation: ${conversationData['patientName']}');
+        loadedConversations.add(conversationData);
+      }
+
+      print('\n✅ MESSAGES SCREEN: Loaded ${loadedConversations.length} conversations total');
+      
+      setState(() {
+        _conversations = loadedConversations;
+        _isLoading = false;
+      });
+      
+      print('📱 MESSAGES SCREEN: UI updated with ${_conversations.length} conversations');
+    } catch (e) {
+      print('❌ MESSAGES SCREEN: Error loading conversations: $e');
+      print('   Stack trace: ${StackTrace.current}');
+      setState(() {
+        _conversations = [];
+        _isLoading = false;
+      });
+    }
+  }
+
+  // Keep old method as backup (renamed) - Not used anymore
+  // ignore: unused_element
+  Future<void> _loadConversations_OLD() async {
     try {
       final appointments = await _providerService.getActiveAppointments();
-      final conversations = _generateConversations(appointments);
+      final conversations = _generateConversations_OLD(appointments);
       
       if (mounted) {
         setState(() {
@@ -75,7 +238,9 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
     }
   }
 
-  List<Map<String, dynamic>> _generateConversations(List<AppointmentRequest> appointments) {
+  // OLD METHODS - Kept as backup (not used anymore)
+  // ignore: unused_element
+  List<Map<String, dynamic>> _generateConversations_OLD(List<AppointmentRequest> appointments) {
     final conversations = <Map<String, dynamic>>[];
     
     // Add conversations for active appointments
@@ -83,61 +248,20 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
       conversations.add({
         'id': appointment.id,
         'patientName': appointment.patientName,
-        'patientAvatar': null, // AppointmentRequest doesn't have avatar
-        'lastMessage': _getLastMessage(appointment),
-        'lastMessageTime': _getLastMessageTime(appointment),
-        'unreadCount': _getUnreadCount(appointment),
+        'patientAvatar': null,
+        'lastMessage': _getLastMessage_OLD(appointment),
+        'lastMessageTime': _getLastMessageTime_OLD(appointment),
+        'unreadCount': _getUnreadCount_OLD(appointment),
         'isOnline': true,
         'serviceType': appointment.serviceType,
         'status': appointment.status.toString().split('.').last,
         'appointment': appointment,
       });
     }
-
-    // Add mock conversations for demonstration
-    conversations.addAll([
-      {
-        'id': 'mock_1',
-        'patientName': 'Emily Johnson',
-        'patientAvatar': null,
-        'lastMessage': 'Thank you for the excellent service!',
-        'lastMessageTime': '2 hours ago',
-        'unreadCount': 0,
-        'isOnline': false,
-        'serviceType': 'General Consultation',
-        'status': 'completed',
-        'appointment': null,
-      },
-      {
-        'id': 'mock_2',
-        'patientName': 'Michael Chen',
-        'patientAvatar': null,
-        'lastMessage': 'When will you arrive?',
-        'lastMessageTime': '15 min ago',
-        'unreadCount': 2,
-        'isOnline': true,
-        'serviceType': 'Home Visit',
-        'status': 'confirmed',
-        'appointment': null,
-      },
-      {
-        'id': 'mock_3',
-        'patientName': 'Sarah Williams',
-        'patientAvatar': null,
-        'lastMessage': 'Perfect, see you soon!',
-        'lastMessageTime': '1 hour ago',
-        'unreadCount': 0,
-        'isOnline': true,
-        'serviceType': 'Emergency Care',
-        'status': 'in_progress',
-        'appointment': null,
-      },
-    ]);
-
     return conversations;
   }
 
-  String _getLastMessage(AppointmentRequest appointment) {
+  String _getLastMessage_OLD(AppointmentRequest appointment) {
     final messages = [
       'Hi, I need your services',
       'When can you arrive?',
@@ -148,22 +272,40 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
     return messages[appointment.id.hashCode % messages.length];
   }
 
-  String _getLastMessageTime(AppointmentRequest appointment) {
+  String _getLastMessageTime_OLD(AppointmentRequest appointment) {
     final times = ['5 min ago', '15 min ago', '30 min ago', '1 hour ago', 'Just now'];
     return times[appointment.id.hashCode % times.length];
   }
 
-  int _getUnreadCount(AppointmentRequest appointment) {
+  int _getUnreadCount_OLD(AppointmentRequest appointment) {
     return appointment.status == AppointmentRequestStatus.pending ? 1 : 0;
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: AppTheme.backgroundColor,
         body: Center(
-          child: CircularProgressIndicator(color: AppTheme.primaryColor),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(color: AppTheme.primaryColor),
+              const SizedBox(height: 16),
+              Text(
+                'Loading your conversations...',
+                style: TextStyle(
+                  color: AppTheme.textSecondaryColor,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: ProviderNavigationBar(
+          selectedIndex: _selectedIndex,
+          onTap: (index) {},
+          hasNotification: false,
         ),
       );
     }
@@ -279,7 +421,7 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
     }
 
     return RefreshIndicator(
-      onRefresh: _loadConversations,
+      onRefresh: _loadConversationsFromFirestore,
       color: AppTheme.primaryColor,
       child: ListView.builder(
         padding: const EdgeInsets.all(20),
@@ -553,9 +695,9 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
     );
   }
 
-  void _openConversation(Map<String, dynamic> conversation) {
+  void _openConversation(Map<String, dynamic> conversation) async {
     // Navigate to comprehensive chat screen
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ComprehensiveProviderChatScreen(
@@ -563,6 +705,9 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
         ),
       ),
     );
+    
+    // Reload conversations to update last message and unread count
+    _loadConversationsFromFirestore();
   }
 
   void _handleNavigation(int index) {

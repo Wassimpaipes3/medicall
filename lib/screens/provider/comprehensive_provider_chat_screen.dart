@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import '../../core/theme.dart';
+import '../../services/chat_service.dart' as chat_svc;
+import '../../services/chat_service.dart' show ChatService;
 
 class ComprehensiveProviderChatScreen extends StatefulWidget {
   final Map<String, dynamic> conversation;
@@ -20,14 +22,16 @@ class _ComprehensiveProviderChatScreenState extends State<ComprehensiveProviderC
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
+  final ChatService _chatService = ChatService();
   
+  late String _patientId;
   late AnimationController _typingAnimationController;
   late Animation<double> _typingAnimation;
   
   List<ChatMessage> _messages = [];
   bool _showQuickReplies = false;
   bool _isTyping = false;
-  bool _patientTyping = false;
+  final bool _patientTyping = false;
   Timer? _typingTimer;
   Timer? _autoReplyTimer;
 
@@ -52,9 +56,9 @@ class _ComprehensiveProviderChatScreenState extends State<ComprehensiveProviderC
   @override
   void initState() {
     super.initState();
+    _patientId = widget.conversation['userId'] ?? widget.conversation['patientId'] ?? '';
     _initializeAnimations();
-    _loadChatHistory();
-    _startTypingSimulation();
+    _initializeChat();
   }
 
   void _initializeAnimations() {
@@ -72,129 +76,73 @@ class _ComprehensiveProviderChatScreenState extends State<ComprehensiveProviderC
     ));
   }
 
-  void _loadChatHistory() {
-    final messages = [
-      ChatMessage(
-        id: '1',
-        text: 'Hi Doctor! I need your services urgently. I\'m having chest pain and shortness of breath.',
-        isFromProvider: false,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 30)),
-        type: MessageType.emergency,
-        status: MessageStatus.read,
-      ),
-      ChatMessage(
-        id: '2',
-        text: '🚨 EMERGENCY RESPONSE ACTIVATED\\n\\nI\'ve received your emergency request. I\'m preparing medical equipment and will be there shortly. Please try to stay calm and follow these instructions:\\n\\n1. Sit down and try to relax\\n2. Take slow, deep breaths\\n3. If pain worsens, call 911 immediately',
-        isFromProvider: true,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 28)),
-        type: MessageType.emergency,
-        status: MessageStatus.read,
-      ),
-      ChatMessage(
-        id: '3',
-        text: 'Thank you doctor! I\'m feeling a bit better now. When can I expect you?',
-        isFromProvider: false,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 25)),
-        type: MessageType.text,
-        status: MessageStatus.read,
-      ),
-      ChatMessage(
-        id: '4',
-        text: 'I\'m currently 5 minutes away from your location. I have all the necessary medical equipment with me. Please have your ID ready and make sure someone can let me in.',
-        isFromProvider: true,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 20)),
-        type: MessageType.text,
-        status: MessageStatus.read,
-      ),
-      ChatMessage(
-        id: '5',
-        text: '📍 My exact location',
-        isFromProvider: false,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 15)),
-        type: MessageType.location,
-        status: MessageStatus.read,
-        locationData: {
-          'latitude': 37.7749,
-          'longitude': -122.4194,
-          'address': '123 Main Street, San Francisco, CA',
-        },
-      ),
-      ChatMessage(
-        id: '6',
-        text: 'Perfect! I can see your location. I\'ll be there in 2 minutes. Please stay where you are.',
-        isFromProvider: true,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 12)),
-        type: MessageType.text,
+  void _initializeChat() async {
+    print('🔵 PROVIDER: Initializing chat for patient: $_patientId');
+    _chatService.addListener(_onChatUpdate);
+    _chatService.initializeConversation(_patientId);
+    _loadMessages();
+  }
+
+  void _onChatUpdate() {
+    print('🔔 PROVIDER: Chat update received');
+    if (mounted) {
+      _loadMessages();
+    }
+  }
+
+  void _loadMessages() {
+    print('📥 PROVIDER: Loading messages for patient: $_patientId');
+    final chatMessages = _chatService.getConversationMessages(_patientId);
+    print('📊 PROVIDER: Retrieved ${chatMessages.length} messages from ChatService');
+    
+    if (chatMessages.isNotEmpty) {
+      print('📝 PROVIDER: First message: ${chatMessages.first.content}');
+      print('📝 PROVIDER: Last message: ${chatMessages.last.content}');
+    } else {
+      print('⚠️ PROVIDER: No messages returned from ChatService!');
+    }
+    
+    setState(() {
+      _messages = chatMessages.map((msg) => ChatMessage(
+        id: msg.id,
+        text: msg.content,
+        isFromProvider: msg.senderId != _patientId,
+        timestamp: msg.timestamp,
+        type: _getMessageType(msg.type),
         status: MessageStatus.delivered,
-      ),
-    ];
-
-    setState(() {
-      _messages = messages;
+      )).toList();
     });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-  }
-
-  void _startTypingSimulation() {
-    // Simulate patient typing occasionally
-    Timer.periodic(const Duration(seconds: 45), (timer) {
-      if (mounted && !_patientTyping) {
-        _simulatePatientTyping();
-      }
+    
+    print('✅ PROVIDER: setState called with ${_messages.length} messages');
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
     });
   }
 
-  void _simulatePatientTyping() {
-    setState(() {
-      _patientTyping = true;
-    });
-    
-    _typingAnimationController.repeat();
-    
-    Timer(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          _patientTyping = false;
-        });
-        _typingAnimationController.stop();
-        
-        // Occasionally send an auto-reply from patient
-        if (DateTime.now().second % 3 == 0) {
-          _sendAutoReply();
-        }
-      }
-    });
+  MessageType _getMessageType(chat_svc.MessageType msgType) {
+    switch (msgType) {
+      case chat_svc.MessageType.system:
+        return MessageType.emergency;
+      case chat_svc.MessageType.image:
+        return MessageType.image;
+      case chat_svc.MessageType.location:
+        return MessageType.location;
+      case chat_svc.MessageType.file:
+        return MessageType.image;
+      default:
+        return MessageType.text;
+    }
   }
 
-  void _sendAutoReply() {
-    final replies = [
-      'Thank you for the update!',
-      'I appreciate your professionalism',
-      'Looking forward to your arrival',
-      'The symptoms are stable now',
-    ];
-    
-    final reply = replies[DateTime.now().second % replies.length];
-    
-    final message = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: reply,
-      isFromProvider: false,
-      timestamp: DateTime.now(),
-      type: MessageType.text,
-      status: MessageStatus.delivered,
-    );
 
-    setState(() {
-      _messages.add(message);
-    });
 
-    _scrollToBottom();
-  }
+
 
   @override
   void dispose() {
+    _chatService.removeListener(_onChatUpdate);
+    _chatService.disposeConversation(_patientId);
     _messageController.dispose();
     _scrollController.dispose();
     _messageFocus.dispose();
@@ -214,47 +162,41 @@ class _ComprehensiveProviderChatScreenState extends State<ComprehensiveProviderC
     }
   }
 
-  void _sendMessage() {
+  void _sendMessage() async {
     final content = _messageController.text.trim();
     if (content.isEmpty) return;
+
+    print('📤 PROVIDER: Attempting to send message to patient: $_patientId');
+    print('📝 PROVIDER: Message content: $content');
 
     // Check for emergency keywords
     final isEmergency = _isEmergencyMessage(content);
 
-    final newMessage = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: content,
-      isFromProvider: true,
-      timestamp: DateTime.now(),
-      type: isEmergency ? MessageType.emergency : MessageType.text,
-      status: MessageStatus.sent,
-    );
-
     setState(() {
-      _messages.add(newMessage);
       _isTyping = false;
     });
 
     _messageController.clear();
+
+    // Send message to Firestore
+    print('🔥 PROVIDER: Calling ChatService.sendMessage()');
+    await _chatService.sendMessage(
+      _patientId,
+      content,
+      isEmergency ? chat_svc.MessageType.system : chat_svc.MessageType.text,
+    );
+    print('✅ PROVIDER: sendMessage() completed');
+
     _scrollToBottom();
 
-    // Simulate message delivery
-    Timer(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          newMessage.status = MessageStatus.delivered;
-        });
-      }
-    });
-
-    // Simulate message being read
-    Timer(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          newMessage.status = MessageStatus.read;
-        });
-      }
-    });
+    // OLD: Simulate message delivery
+    // Timer(const Duration(seconds: 1), () {
+    //   if (mounted) {
+    //     setState(() {
+    //       newMessage.status = MessageStatus.delivered;
+    //     });
+    //   }
+    // });
 
     HapticFeedback.lightImpact();
   }
@@ -270,20 +212,17 @@ class _ComprehensiveProviderChatScreenState extends State<ComprehensiveProviderC
     );
   }
 
-  void _sendQuickReply(String message) {
-    final newMessage = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: message,
-      isFromProvider: true,
-      timestamp: DateTime.now(),
-      type: MessageType.text,
-      status: MessageStatus.sent,
-    );
-
+  void _sendQuickReply(String message) async {
     setState(() {
-      _messages.add(newMessage);
       _showQuickReplies = false;
     });
+
+    // Send message to Firestore
+    await _chatService.sendMessage(
+      _patientId,
+      message,
+      chat_svc.MessageType.text,
+    );
 
     _scrollToBottom();
     HapticFeedback.lightImpact();

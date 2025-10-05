@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import '../../core/theme.dart';
+import '../../services/chat_service.dart';
 
 class PatientChatScreen extends StatefulWidget {
   final Map<String, dynamic> doctorInfo;
@@ -22,14 +23,16 @@ class _PatientChatScreenState extends State<PatientChatScreen>
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _messageFocus = FocusNode();
+  final ChatService _chatService = ChatService();
   
   late AnimationController _typingAnimationController;
   late Animation<double> _typingAnimation;
+  late String _doctorId;
   
   List<PatientChatMessage> _messages = [];
   bool _showQuickReplies = false;
   bool _isTyping = false;
-  bool _doctorTyping = false;
+  final bool _doctorTyping = false;
   Timer? _typingTimer;
 
   final List<String> _patientQuickReplies = [
@@ -46,9 +49,9 @@ class _PatientChatScreenState extends State<PatientChatScreen>
   @override
   void initState() {
     super.initState();
+    _doctorId = widget.doctorInfo['id'] ?? widget.doctorInfo['userId'] ?? '';
     _initializeAnimations();
-    _loadChatHistory();
-    _startDoctorTypingSimulation();
+    _initializeChat();
   }
 
   void _initializeAnimations() {
@@ -66,110 +69,71 @@ class _PatientChatScreenState extends State<PatientChatScreen>
     ));
   }
 
-  void _loadChatHistory() {
-    final messages = [
-      PatientChatMessage(
-        id: '1',
-        text: 'Hello Dr. ${widget.doctorInfo['name']}! I wanted to follow up on my recent visit.',
-        isFromPatient: true,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 25)),
-        type: PatientMessageType.text,
-        status: PatientMessageStatus.read,
-      ),
-      PatientChatMessage(
-        id: '2',
-        text: 'Hello! Thank you for reaching out. I\'ve reviewed your case. How are you feeling since our last appointment?',
-        isFromPatient: false,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 20)),
-        type: PatientMessageType.text,
-        status: PatientMessageStatus.read,
-      ),
-      PatientChatMessage(
-        id: '3',
-        text: 'I\'m feeling much better! The medication you prescribed is working well. However, I have a few questions about the dosage.',
-        isFromPatient: true,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 15)),
-        type: PatientMessageType.text,
-        status: PatientMessageStatus.read,
-      ),
-      PatientChatMessage(
-        id: '4',
-        text: 'I\'m glad to hear you\'re feeling better! Please go ahead with your questions about the medication. I\'m here to help clarify anything.',
-        isFromPatient: false,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 12)),
-        type: PatientMessageType.text,
-        status: PatientMessageStatus.delivered,
-      ),
-      PatientChatMessage(
-        id: '5',
-        text: 'Should I take the medication with food? And is it normal to feel slightly drowsy?',
-        isFromPatient: true,
-        timestamp: DateTime.now().subtract(const Duration(minutes: 8)),
-        type: PatientMessageType.text,
-        status: PatientMessageStatus.delivered,
-      ),
-    ];
-
-    setState(() {
-      _messages = messages;
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  void _initializeChat() {
+    print('🔵 PATIENT: Initializing chat for doctor: $_doctorId');
+    
+    // Initialize conversation with real-time Firestore listener
+    _chatService.initializeConversation(_doctorId);
+    
+    // Mark messages as read
+    _chatService.markConversationAsRead(_doctorId);
+    
+    // Listen to chat service updates
+    _chatService.addListener(_onChatUpdate);
+    
+    // Load initial messages
+    _loadMessages();
   }
 
-  void _startDoctorTypingSimulation() {
-    Timer.periodic(const Duration(seconds: 30), (timer) {
-      if (mounted && !_doctorTyping) {
-        _simulateDoctorTyping();
-      }
-    });
+  void _onChatUpdate() {
+    print('🔔 PATIENT: Chat update received');
+    if (mounted) {
+      _loadMessages();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    }
   }
 
-  void _simulateDoctorTyping() {
+  void _loadMessages() {
+    print('📥 PATIENT: Loading messages for doctor: $_doctorId');
+    final chatMessages = _chatService.getConversationMessages(_doctorId);
+    print('📊 PATIENT: Retrieved ${chatMessages.length} messages from ChatService');
+    
+    if (chatMessages.isNotEmpty) {
+      print('📝 PATIENT: First message: ${chatMessages.first.content}');
+      print('📝 PATIENT: Last message: ${chatMessages.last.content}');
+    } else {
+      print('⚠️ PATIENT: No messages returned from ChatService!');
+    }
+    
     setState(() {
-      _doctorTyping = true;
+      _messages = chatMessages.map((msg) {
+        return PatientChatMessage(
+          id: msg.id,
+          text: msg.content,
+          isFromPatient: msg.isFromCurrentUser,
+          timestamp: msg.timestamp,
+          type: _getMessageType(msg.type),
+          status: msg.isFromCurrentUser 
+              ? PatientMessageStatus.delivered 
+              : PatientMessageStatus.read,
+        );
+      }).toList();
     });
     
-    _typingAnimationController.repeat();
-    
-    Timer(const Duration(seconds: 4), () {
-      if (mounted) {
-        setState(() {
-          _doctorTyping = false;
-        });
-        _typingAnimationController.stop();
-        
-        if (DateTime.now().second % 4 == 0) {
-          _sendDoctorAutoReply();
-        }
-      }
-    });
+    print('✅ PATIENT: setState called with ${_messages.length} messages');
   }
 
-  void _sendDoctorAutoReply() {
-    final replies = [
-      'Yes, please take the medication with food to avoid stomach upset.',
-      'Mild drowsiness is normal and should improve in a few days.',
-      'Keep monitoring your symptoms and let me know if anything changes.',
-      'Your next appointment is scheduled for next week.',
-    ];
-    
-    final reply = replies[DateTime.now().second % replies.length];
-    
-    final message = PatientChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: reply,
-      isFromPatient: false,
-      timestamp: DateTime.now(),
-      type: PatientMessageType.text,
-      status: PatientMessageStatus.delivered,
-    );
-
-    setState(() {
-      _messages.add(message);
-    });
-
-    _scrollToBottom();
+  PatientMessageType _getMessageType(MessageType type) {
+    switch (type) {
+      case MessageType.system:
+        return PatientMessageType.appointment;
+      case MessageType.location:
+      case MessageType.image:
+      case MessageType.file:
+        return PatientMessageType.medicalRecord;
+      default:
+        return PatientMessageType.text;
+    }
   }
 
   @override
@@ -179,6 +143,8 @@ class _PatientChatScreenState extends State<PatientChatScreen>
     _messageFocus.dispose();
     _typingAnimationController.dispose();
     _typingTimer?.cancel();
+    _chatService.removeListener(_onChatUpdate);
+    _chatService.disposeConversation(_doctorId);
     super.dispose();
   }
 
@@ -192,73 +158,46 @@ class _PatientChatScreenState extends State<PatientChatScreen>
     }
   }
 
-  void _sendMessage() {
+  void _sendMessage() async {
     final content = _messageController.text.trim();
     if (content.isEmpty) return;
 
-    final isUrgent = _isUrgentMessage(content);
+    print('📤 PATIENT: Attempting to send message to doctor: $_doctorId');
+    print('📝 PATIENT: Message content: $content');
 
-    final newMessage = PatientChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: content,
-      isFromPatient: true,
-      timestamp: DateTime.now(),
-      type: isUrgent ? PatientMessageType.urgent : PatientMessageType.text,
-      status: PatientMessageStatus.sent,
-    );
-
+    // Clear input immediately for better UX
+    _messageController.clear();
     setState(() {
-      _messages.add(newMessage);
       _isTyping = false;
     });
 
-    _messageController.clear();
+    // Send message to Firestore via ChatService
+    print('🔥 PATIENT: Calling ChatService.sendMessage()');
+    await _chatService.sendMessage(
+      _doctorId,
+      content,
+      MessageType.text,
+    );
+    print('✅ PATIENT: sendMessage() completed');
+
+    // Mark as read (since we're viewing the chat)
+    await _chatService.markConversationAsRead(_doctorId);
+
     _scrollToBottom();
-
-    Timer(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          newMessage.status = PatientMessageStatus.delivered;
-        });
-      }
-    });
-
-    Timer(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() {
-          newMessage.status = PatientMessageStatus.read;
-        });
-      }
-    });
-
     HapticFeedback.lightImpact();
   }
 
-  bool _isUrgentMessage(String message) {
-    final urgentKeywords = [
-      'urgent', 'emergency', 'help', 'pain', 'severe', 
-      'can\'t breathe', 'chest pain', 'bleeding', 'unconscious'
-    ];
-    
-    return urgentKeywords.any((keyword) => 
-      message.toLowerCase().contains(keyword)
-    );
-  }
-
-  void _sendQuickReply(String message) {
-    final newMessage = PatientChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: message,
-      isFromPatient: true,
-      timestamp: DateTime.now(),
-      type: PatientMessageType.text,
-      status: PatientMessageStatus.sent,
-    );
-
+  void _sendQuickReply(String message) async {
     setState(() {
-      _messages.add(newMessage);
       _showQuickReplies = false;
     });
+
+    // Send quick reply to Firestore via ChatService
+    await _chatService.sendMessage(
+      _doctorId,
+      message,
+      MessageType.text,
+    );
 
     _scrollToBottom();
     HapticFeedback.lightImpact();

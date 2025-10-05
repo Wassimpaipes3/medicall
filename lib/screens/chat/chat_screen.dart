@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
 import '../../controllers/navigation_controller.dart';
 import 'ai_chat_screen.dart';
@@ -18,68 +20,18 @@ class _ChatScreenState extends State<ChatScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
-  final List<Map<String, dynamic>> _chatList = [
-    {
-      'id': 'ai-assistant',
-      'name': 'AI Health Assistant',
-      'specialty': '24/7 Health Support',
-      'lastMessage': 'Hello! I\'m here to help with your health questions.',
-      'time': 'Online',
-      'unreadCount': 0,
-      'isOnline': true,
-      'avatar': 'ai-assistant',
-      'isAI': true,
-    },
-    {
-      'id': '1',
-      'name': 'Dr. Sarah Johnson',
-      'specialty': 'Cardiologist',
-      'lastMessage': 'Your test results look good. Let\'s schedule a follow-up.',
-      'time': '2:30 PM',
-      'unreadCount': 2,
-      'isOnline': true,
-      'avatar': 'assets/images/doctor1.png',
-      'isAI': false,
-    },
-    {
-      'id': '2',
-      'name': 'Dr. Ahmed Hassan',
-      'specialty': 'Neurologist',
-      'lastMessage': 'Please take your medication as prescribed.',
-      'time': '11:45 AM',
-      'unreadCount': 0,
-      'isOnline': false,
-      'avatar': 'assets/images/doctor2.png',
-      'isAI': false,
-    },
-    {
-      'id': '3',
-      'name': 'Nurse Lisa Chen',
-      'specialty': 'Critical Care',
-      'lastMessage': 'Reminder: Your appointment is tomorrow at 10 AM.',
-      'time': 'Yesterday',
-      'unreadCount': 1,
-      'isOnline': true,
-      'avatar': 'assets/images/nurse1.png',
-      'isAI': false,
-    },
-    {
-      'id': '4',
-      'name': 'Dr. Maria Garcia',
-      'specialty': 'Pediatrician',
-      'lastMessage': 'The vaccination schedule has been updated.',
-      'time': '2 days ago',
-      'unreadCount': 0,
-      'isOnline': false,
-      'avatar': 'assets/images/doctor3.png',
-    },
-  ];
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  
+  List<Map<String, dynamic>> _chatList = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
     _animationController.forward();
+    _loadChatsFromFirestore();
   }
 
   void _initializeAnimations() {
@@ -105,13 +57,164 @@ class _ChatScreenState extends State<ChatScreen>
     ));
   }
 
+  Future<void> _loadChatsFromFirestore() async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      final currentUser = _auth.currentUser;
+      if (currentUser == null) {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final userId = currentUser.uid;
+
+      // Always include AI Assistant at the top
+      final aiAssistant = {
+        'id': 'ai-assistant',
+        'name': 'AI Health Assistant',
+        'specialty': '24/7 Health Support',
+        'lastMessage': 'Hello! I\'m here to help with your health questions.',
+        'time': 'Online',
+        'unreadCount': 0,
+        'isOnline': true,
+        'avatar': 'ai-assistant',
+        'isAI': true,
+        'timestamp': DateTime.now(),
+      };
+
+      // Get all chats where current user is a participant
+      final chatsQuery = await _firestore
+          .collection('chats')
+          .where('participants', arrayContains: userId)
+          .orderBy('lastTimestamp', descending: true)
+          .get();
+
+      List<Map<String, dynamic>> loadedChats = [aiAssistant];
+
+      for (var chatDoc in chatsQuery.docs) {
+        final chatData = chatDoc.data();
+        final participants = List<String>.from(chatData['participants'] ?? []);
+        
+        // Get the other participant (the doctor/provider)
+        final otherUserId = participants.firstWhere(
+          (id) => id != userId,
+          orElse: () => '',
+        );
+
+        if (otherUserId.isEmpty) continue;
+
+        // Try to get provider info from professionals collection
+        DocumentSnapshot? providerDoc;
+        try {
+          providerDoc = await _firestore
+              .collection('professionals')
+              .doc(otherUserId)
+              .get();
+        } catch (e) {
+          // If not found, try patients collection (for testing)
+          try {
+            providerDoc = await _firestore
+                .collection('patients')
+                .doc(otherUserId)
+                .get();
+          } catch (e) {
+            continue;
+          }
+        }
+
+        if (!providerDoc.exists) continue;
+
+        final providerData = providerDoc.data() as Map<String, dynamic>?;
+        if (providerData == null) continue;
+
+        // Get unread message count
+        final messagesQuery = await _firestore
+            .collection('chats')
+            .doc(chatDoc.id)
+            .collection('messages')
+            .where('senderId', isEqualTo: otherUserId)
+            .where('seen', isEqualTo: false)
+            .get();
+
+        final unreadCount = messagesQuery.docs.length;
+
+        // Format timestamp
+        final lastTimestamp = (chatData['lastTimestamp'] as Timestamp?)?.toDate();
+        String timeString = 'No messages';
+        if (lastTimestamp != null) {
+          final now = DateTime.now();
+          final difference = now.difference(lastTimestamp);
+
+          if (difference.inMinutes < 1) {
+            timeString = 'Just now';
+          } else if (difference.inHours < 1) {
+            timeString = '${difference.inMinutes}m ago';
+          } else if (difference.inDays < 1) {
+            timeString = '${lastTimestamp.hour}:${lastTimestamp.minute.toString().padLeft(2, '0')}';
+          } else if (difference.inDays < 2) {
+            timeString = 'Yesterday';
+          } else if (difference.inDays < 7) {
+            timeString = '${difference.inDays}d ago';
+          } else {
+            timeString = '${lastTimestamp.day}/${lastTimestamp.month}/${lastTimestamp.year}';
+          }
+        }
+
+        loadedChats.add({
+          'id': otherUserId,
+          'name': providerData['name'] ?? providerData['fullName'] ?? 'Provider',
+          'specialty': providerData['specialty'] ?? providerData['role'] ?? 'Healthcare Provider',
+          'lastMessage': chatData['lastMessage'] ?? 'No messages yet',
+          'time': timeString,
+          'unreadCount': unreadCount,
+          'isOnline': providerData['isOnline'] ?? false,
+          'avatar': providerData['profileImage'] ?? providerData['avatar'] ?? 'assets/images/doctor1.png',
+          'isAI': false,
+          'timestamp': lastTimestamp ?? DateTime.now(),
+          'rating': providerData['rating']?.toString() ?? '4.5',
+          'experience': providerData['experience']?.toString() ?? '5+',
+        });
+      }
+
+      setState(() {
+        _chatList = loadedChats;
+        _isLoading = false;
+      });
+    } catch (e) {
+      print('Error loading chats: $e');
+      // Fallback to AI Assistant only
+      setState(() {
+        _chatList = [
+          {
+            'id': 'ai-assistant',
+            'name': 'AI Health Assistant',
+            'specialty': '24/7 Health Support',
+            'lastMessage': 'Hello! I\'m here to help with your health questions.',
+            'time': 'Online',
+            'unreadCount': 0,
+            'isOnline': true,
+            'avatar': 'ai-assistant',
+            'isAI': true,
+            'timestamp': DateTime.now(),
+          }
+        ];
+        _isLoading = false;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _animationController.dispose();
     super.dispose();
   }
 
-  void _openChat(Map<String, dynamic> chat) {
+  void _openChat(Map<String, dynamic> chat) async {
     // Store chat context for navigation consistency
     HapticFeedback.lightImpact();
     
@@ -132,7 +235,8 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       );
     } else {
-      Navigator.push(
+      // Navigate to chat and reload list when returning to see updated last message
+      await Navigator.push(
         context,
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) => 
@@ -142,8 +246,8 @@ class _ChatScreenState extends State<ChatScreen>
                   'name': chat['name']?.toString() ?? 'Provider',
                   'specialty': chat['specialty']?.toString() ?? 'General Physician',
                   'isOnline': chat['isOnline'] ?? true,
-                  'rating': '4.8',
-                  'experience': '10+',
+                  'rating': chat['rating']?.toString() ?? '4.5',
+                  'experience': chat['experience']?.toString() ?? '5+',
                 },
               ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -156,7 +260,187 @@ class _ChatScreenState extends State<ChatScreen>
           },
         ),
       );
+      
+      // Reload chats to update last message and unread count
+      _loadChatsFromFirestore();
     }
+  }
+
+  void _showNewChatDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) {
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Start New Chat',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.textPrimaryColor,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: FutureBuilder<QuerySnapshot>(
+                    future: _firestore.collection('professionals').get(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return Center(
+                          child: CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+                          ),
+                        );
+                      }
+
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.medical_services_outlined,
+                                size: 64,
+                                color: Colors.grey[300],
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No healthcare providers available',
+                                style: TextStyle(
+                                  color: AppTheme.textSecondaryColor,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        controller: scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        itemCount: snapshot.data!.docs.length,
+                        itemBuilder: (context, index) {
+                          final doc = snapshot.data!.docs[index];
+                          final data = doc.data() as Map<String, dynamic>;
+                          
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.all(12),
+                              leading: CircleAvatar(
+                                radius: 28,
+                                backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                                child: Icon(
+                                  Icons.person,
+                                  color: AppTheme.primaryColor,
+                                  size: 28,
+                                ),
+                              ),
+                              title: Text(
+                                data['name'] ?? data['fullName'] ?? 'Provider',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    data['specialty'] ?? 'Healthcare Provider',
+                                    style: TextStyle(
+                                      color: AppTheme.textSecondaryColor,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  if (data['rating'] != null) ...[
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.star,
+                                          size: 16,
+                                          color: Colors.amber,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          data['rating'].toString(),
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              trailing: Icon(
+                                Icons.chat_bubble_outline,
+                                color: AppTheme.primaryColor,
+                              ),
+                              onTap: () {
+                                Navigator.pop(context);
+                                _openChat({
+                                  'id': doc.id,
+                                  'name': data['name'] ?? data['fullName'] ?? 'Provider',
+                                  'specialty': data['specialty'] ?? 'Healthcare Provider',
+                                  'isOnline': data['isOnline'] ?? false,
+                                  'rating': data['rating']?.toString() ?? '4.5',
+                                  'experience': data['experience']?.toString() ?? '5+',
+                                  'isAI': false,
+                                });
+                              },
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -218,8 +502,8 @@ class _ChatScreenState extends State<ChatScreen>
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppTheme.primaryColor,
         onPressed: () {
-          // TODO: Start new chat
           HapticFeedback.mediumImpact();
+          _showNewChatDialog();
         },
         child: const Icon(
           Icons.add_comment_rounded,
@@ -230,21 +514,46 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildChatList() {
+    if (_isLoading) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Loading your conversations...',
+              style: TextStyle(
+                color: AppTheme.textSecondaryColor,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_chatList.isEmpty) {
       return _buildEmptyState();
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-      itemCount: _chatList.length + 1,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return _buildHeader();
-        }
-        
-        final chat = _chatList[index - 1];
-        return _buildChatCard(chat, index - 1);
-      },
+    return RefreshIndicator(
+      color: AppTheme.primaryColor,
+      onRefresh: _loadChatsFromFirestore,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        itemCount: _chatList.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return _buildHeader();
+          }
+          
+          final chat = _chatList[index - 1];
+          return _buildChatCard(chat, index - 1);
+        },
+      ),
     );
   }
 
