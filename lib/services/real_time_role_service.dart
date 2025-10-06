@@ -136,6 +136,8 @@ class RealTimeRoleService extends ChangeNotifier {
         return '/home'; // Use the existing patient home route
       case 'doctor':
       case 'docteur':
+      case 'infirmier':
+      case 'nurse':
       case 'professional':
       case 'provider':
         return '/provider-dashboard';
@@ -229,29 +231,120 @@ class RealTimeRoleService extends ChangeNotifier {
 
       final firestore = FirebaseFirestore.instance;
       
-      // Update user role in Firestore
+      // Step 1: Get current user data and role
+      final userDoc = await firestore.collection('users').doc(targetUserId).get();
+      if (!userDoc.exists) {
+        debugPrint('❌ User document not found');
+        return false;
+      }
+      
+      final userData = userDoc.data()!;
+      final oldRole = userData['role'] as String?;
+      
+      debugPrint('📋 Current role: $oldRole → New role: $newRole');
+      
+      // Step 2: Remove from old role-specific collection
+      if (oldRole != null && oldRole != newRole) {
+        final oldCollection = _getRoleCollection(oldRole);
+        if (oldCollection != null) {
+          debugPrint('🗑️ Removing from $oldCollection collection...');
+          await firestore.collection(oldCollection).doc(targetUserId).delete();
+          debugPrint('✅ Removed from $oldCollection collection');
+        }
+      }
+      
+      // Step 3: Add to new role-specific collection
+      final newCollection = _getRoleCollection(newRole);
+      if (newCollection != null) {
+        debugPrint('➕ Adding to $newCollection collection...');
+        
+        if (newCollection == 'patients') {
+          // Create patient medical document with required fields
+          await firestore.collection('patients').doc(targetUserId).set({
+            'allergies': '',
+            'antecedents': '',
+            'dossiers_medicaux': '',
+            'groupe_sanguin': '',
+            'notifications_non_lues': '0',
+          });
+          debugPrint('✅ Created patient document with medical fields');
+        } else if (newCollection == 'professionals') {
+          // Create professional document with required fields
+          await firestore.collection('professionals').doc(targetUserId).set({
+            'profession': _mapRoleToProfession(newRole),
+            'specialite': 'generaliste',
+            'service': 'consultation',
+            'disponible': true,
+            'rating': 0.0,
+            'reviewsCount': 0,
+            'prix': 100,
+            'bio': '',
+            'login': userData['email']?.split('@')[0] ?? 'user_${targetUserId.substring(0, 8)}',
+            'id_user': targetUserId,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          debugPrint('✅ Created professional document');
+        }
+      }
+      
+      // Step 4: Update user role in users collection
       await firestore.collection('users').doc(targetUserId).update({
         'role': newRole,
         'role_changed_at': FieldValue.serverTimestamp(),
         'role_changed_by': adminUserId,
         'role_change_reason': reason ?? 'Admin role update',
       });
+      debugPrint('✅ Updated role in users collection');
 
-      // Log the role change for audit trail
+      // Step 5: Log the role change for audit trail
       await firestore.collection('role_change_log').add({
         'target_user_id': targetUserId,
+        'old_role': oldRole,
         'new_role': newRole,
         'changed_by': adminUserId,
         'changed_at': FieldValue.serverTimestamp(),
         'reason': reason ?? 'Admin role update',
       });
+      debugPrint('✅ Role change logged');
 
-      debugPrint('✅ Admin role change completed');
+      debugPrint('✅ Admin role change completed successfully');
       return true;
     } catch (e) {
       debugPrint('❌ Error in admin role change: $e');
       return false;
     }
+  }
+  
+  /// Helper: Get collection name for a role
+  static String? _getRoleCollection(String role) {
+    final lowerRole = role.toLowerCase();
+    
+    if (lowerRole == 'patient') {
+      return 'patients';
+    } else if (lowerRole == 'docteur' || 
+               lowerRole == 'doctor' || 
+               lowerRole == 'medecin' ||
+               lowerRole == 'infirmier' ||
+               lowerRole == 'nurse' ||
+               lowerRole == 'provider') {
+      return 'professionals';
+    }
+    
+    return null; // Admin or other roles don't have specific collections
+  }
+  
+  /// Helper: Map role to profession field value
+  static String _mapRoleToProfession(String role) {
+    final lowerRole = role.toLowerCase();
+    
+    if (lowerRole == 'docteur' || lowerRole == 'doctor') {
+      return 'medecin';
+    } else if (lowerRole == 'infirmier' || lowerRole == 'nurse') {
+      return 'infirmier';
+    }
+    
+    return 'medecin'; // Default to medecin
   }
 
   /// Initialize the service when app starts

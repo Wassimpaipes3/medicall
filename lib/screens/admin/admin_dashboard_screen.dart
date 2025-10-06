@@ -50,8 +50,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     // Role options
     final roles = [
       {'value': 'patient', 'label': 'Patient'},
-      {'value': 'doctor', 'label': 'Docteur'},
-      {'value': 'professional', 'label': 'Professionnel'},
+      {'value': 'docteur', 'label': 'Docteur'},
+      {'value': 'infirmier', 'label': 'Infirmier(ère)'},
       {'value': 'admin', 'label': 'Administrateur'},
     ];
 
@@ -140,6 +140,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       case 'doctor':
       case 'docteur':
         return 'Docteur';
+      case 'nurse':
+      case 'infirmier':
+        return 'Infirmier';
       case 'professional':
         return 'Pro';
       case 'admin':
@@ -156,6 +159,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       case 'doctor':
       case 'docteur':
         return Colors.green;
+      case 'nurse':
+      case 'infirmier':
+        return Colors.purple;
       case 'professional':
         return Colors.orange;
       case 'admin':

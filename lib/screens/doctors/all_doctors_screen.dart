@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme.dart';
 import '../../core/services/call_service.dart';
 
@@ -16,6 +17,9 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  Stream<QuerySnapshot>? _doctorsStream;
+
   String _selectedCategory = 'All';
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
@@ -28,93 +32,17 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
     'Orthopedic',
   ];
 
-  // Same doctors as home screen for consistency
-  final List<Map<String, dynamic>> _medicalStaff = [
-    {
-      'id': 'dr_sarah',
-      'name': 'Dr. Sarah Johnson',
-      'specialty': 'Cardiologist',
-      'type': 'Doctor',
-      'rating': 4.9,
-      'experience': '15 years',
-      'avatar': 'assets/images/avatar.png',
-      'available': true,
-      'consultationFee': 150,
-      'reviews': 2847,
-      'location': 'Cardiology Wing, Floor 2',
-      'phone': '+1 (555) 123-4567',
-      'email': 'sarah.johnson@hospital.com',
-      'languages': ['English', 'Spanish'],
-      'education': 'MD from Harvard Medical School',
-      'nextSlot': '10:30 AM',
-    },
-    {
-      'id': 'dr_ahmed',
-      'name': 'Dr. Ahmed Hassan',
-      'specialty': 'Neurologist', 
-      'type': 'Doctor',
-      'rating': 4.8,
-      'experience': '12 years',
-      'avatar': 'assets/images/avatar.png',
-      'available': true,
-      'consultationFee': 200,
-      'reviews': 1923,
-      'location': 'Neurology Department',
-      'phone': '+1 (555) 234-5678',
-      'email': 'ahmed.hassan@hospital.com',
-      'languages': ['English', 'Arabic'],
-      'education': 'MD from Johns Hopkins',
-      'nextSlot': '2:15 PM',
-    },
-    {
-      'id': 'dr_maria',
-      'name': 'Dr. Maria Garcia',
-      'specialty': 'Pediatrician',
-      'type': 'Doctor',
-      'rating': 4.9,
-      'experience': '10 years',
-      'avatar': 'assets/images/avatar.png',
-      'available': false,
-      'consultationFee': 120,
-      'reviews': 3156,
-      'location': 'Pediatrics Wing',
-      'phone': '+1 (555) 345-6789',
-      'email': 'maria.garcia@hospital.com',
-      'languages': ['English', 'Spanish', 'French'],
-      'education': 'MD from UCLA Medical School',
-      'nextSlot': 'Tomorrow 9:00 AM',
-    },
-    {
-      'id': 'dr_james',
-      'name': 'Dr. James Wilson',
-      'specialty': 'Orthopedic',
-      'type': 'Doctor',
-      'rating': 4.7,
-      'experience': '18 years',
-      'avatar': 'assets/images/avatar.png',
-      'available': true,
-      'consultationFee': 180,
-      'reviews': 2234,
-      'location': 'Orthopedic Wing, Floor 4',
-      'phone': '+1 (555) 456-7890',
-      'email': 'james.wilson@hospital.com',
-      'languages': ['English'],
-      'education': 'MD from Harvard Medical School',
-      'nextSlot': '1:45 PM',
-    },
-  ];
-
-  List<Map<String, dynamic>> get _filteredStaff {
-    return _medicalStaff.where((staff) {
-      final matchesCategory = _selectedCategory == 'All' || 
-                              staff['specialty'].toLowerCase().contains(_selectedCategory.toLowerCase());
-      
-      final matchesSearch = _searchQuery.isEmpty ||
-                           staff['name'].toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                           staff['specialty'].toLowerCase().contains(_searchQuery.toLowerCase());
-      
-      return matchesCategory && matchesSearch;
-    }).toList();
+  // Fetch user profile from users collection
+  Future<Map<String, dynamic>?> _getUserProfile(String userId) async {
+    try {
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        return userDoc.data();
+      }
+    } catch (e) {
+      print('Error fetching user profile for $userId: $e');
+    }
+    return null;
   }
 
   @override
@@ -122,6 +50,16 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
     super.initState();
     _initializeAnimations();
     _animationController.forward();
+    _initializeFirestoreStream();
+  }
+
+  void _initializeFirestoreStream() {
+    // Fetch all doctors from professionals collection
+    _doctorsStream = _firestore
+        .collection('professionals')
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .orderBy('rating', descending: true)
+        .snapshots();
   }
 
   void _initializeAnimations() {
@@ -428,51 +366,131 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
   }
 
   Widget _buildStaffList() {
-    final filteredStaff = _filteredStaff;
-    
-    if (filteredStaff.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              size: 64,
-              color: Colors.grey[400],
+    return StreamBuilder<QuerySnapshot>(
+      stream: _doctorsStream,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(color: AppTheme.primaryColor),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 64, color: Colors.red[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'Error loading doctors',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondaryColor,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              'No staff found',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.textSecondaryColor,
-              ),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.medical_services_outlined, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                Text(
+                  'No doctors found',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondaryColor,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Try adjusting your search or filter',
-              style: TextStyle(
-                fontSize: 14,
-                color: AppTheme.textSecondaryColor,
-              ),
+          );
+        }
+
+        // Filter doctors based on search and category
+        final allDoctors = snapshot.data!.docs;
+        final filteredDoctors = allDoctors.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final specialty = data['specialite'] ?? data['service'] ?? '';
+          final login = data['login'] ?? '';
+          
+          // Category filter
+          final matchesCategory = _selectedCategory == 'All' ||
+              specialty.toLowerCase().contains(_selectedCategory.toLowerCase());
+          
+          // Search filter
+          final matchesSearch = _searchQuery.isEmpty ||
+              login.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              specialty.toLowerCase().contains(_searchQuery.toLowerCase());
+          
+          return matchesCategory && matchesSearch;
+        }).toList();
+
+        if (filteredDoctors.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.search_off_rounded,
+                  size: 64,
+                  color: Colors.grey[400],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'No doctors found',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textSecondaryColor,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Try adjusting your search or filter',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: AppTheme.textSecondaryColor,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      );
-    }
-    
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-      itemCount: filteredStaff.length,
-      itemBuilder: (context, index) {
-        final staff = filteredStaff[index];
-        return _buildStaffCard(staff, index);
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          itemCount: filteredDoctors.length,
+          itemBuilder: (context, index) {
+            final doctorDoc = filteredDoctors[index];
+            final doctorData = doctorDoc.data() as Map<String, dynamic>;
+            final doctorId = doctorDoc.id;
+            return _buildStaffCard(doctorData, doctorId, index);
+          },
+        );
       },
     );
   }
 
-  Widget _buildStaffCard(Map<String, dynamic> staff, int index) {
+  Widget _buildStaffCard(Map<String, dynamic> staff, String doctorId, int index) {
+    // Map Firestore fields to UI
+    final userId = staff['id_user'] as String?;
+    final specialty = staff['specialite'] ?? staff['service'] ?? 'General';
+    final rating = ((staff['rating'] ?? 0.0) is int)
+        ? (staff['rating'] as int).toDouble()
+        : (staff['rating'] ?? 0.0).toDouble();
+    final isAvailable = staff['disponible'] ?? false;
+    final fee = staff['prix'] ?? 100;
+    final type = staff['profession'] ?? 'medecin';
+    
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -493,32 +511,35 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
           children: [
             Row(
               children: [
-                // Avatar
+                // Avatar - fetch from users collection or show icon
                 Stack(
                   children: [
-                    Container(
-                      width: 60,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: _getGradientColors(staff['type']),
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _getGradientColors(staff['type'])[0].withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        _getStaffIcon(staff['type']),
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
-                    if (staff['available'])
+                    userId != null
+                        ? FutureBuilder<Map<String, dynamic>?>(
+                            future: _getUserProfile(userId),
+                            builder: (context, snapshot) {
+                              final userData = snapshot.data;
+                              final photoUrl = userData?['photo_profile'];
+                              
+                              if (photoUrl != null && photoUrl.toString().trim().isNotEmpty) {
+                                return ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Image.network(
+                                    photoUrl.toString(),
+                                    width: 60,
+                                    height: 60,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return _buildDefaultAvatar(type);
+                                    },
+                                  ),
+                                );
+                              }
+                              return _buildDefaultAvatar(type);
+                            },
+                          )
+                        : _buildDefaultAvatar(type),
+                    if (isAvailable)
                       Positioned(
                         bottom: 0,
                         right: 0,
@@ -535,7 +556,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                   ],
                 ),
                 const SizedBox(width: 16),
-                // Info
+                // Info - fetch name from users collection
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -543,21 +564,52 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                       Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              staff['name'],
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.textPrimaryColor,
-                              ),
-                            ),
+                            child: userId != null
+                                ? FutureBuilder<Map<String, dynamic>?>(
+                                    future: _getUserProfile(userId),
+                                    builder: (context, snapshot) {
+                                      String displayName = 'Dr. ${staff['login'] ?? 'Professional'}';
+                                      
+                                      if (snapshot.connectionState == ConnectionState.done &&
+                                          snapshot.hasData) {
+                                        final userData = snapshot.data;
+                                        final nom = userData?['nom'] ?? '';
+                                        final prenom = userData?['prenom'] ?? '';
+                                        
+                                        if (nom.isNotEmpty && prenom.isNotEmpty) {
+                                          displayName = 'Dr. $prenom $nom';
+                                        } else if (nom.isNotEmpty) {
+                                          displayName = 'Dr. $nom';
+                                        } else if (prenom.isNotEmpty) {
+                                          displayName = 'Dr. $prenom';
+                                        }
+                                      }
+                                      
+                                      return Text(
+                                        displayName,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppTheme.textPrimaryColor,
+                                        ),
+                                      );
+                                    },
+                                  )
+                                : Text(
+                                    'Dr. ${staff['login'] ?? 'Professional'}',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.textPrimaryColor,
+                                    ),
+                                  ),
                           ),
-                          _buildRatingBadge(staff['rating']),
+                          _buildRatingBadge(rating),
                         ],
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        staff['specialty'],
+                        specialty,
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -566,7 +618,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '${staff['experience']} • ${staff['location']}',
+                        '5 years • ${specialty}',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.textSecondaryColor,
@@ -581,11 +633,11 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
             // Status and Details
             Row(
               children: [
-                _buildStatusBadge(staff['available'] ? 'Available Now' : 'Unavailable', staff['available']),
+                _buildStatusBadge(isAvailable ? 'Available Now' : 'Unavailable', isAvailable),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Next: ${staff['nextSlot']} • \$${staff['consultationFee']}',
+                    'Consultation • \$${fee}',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppTheme.textSecondaryColor,
@@ -595,9 +647,9 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
               ],
             ),
             const SizedBox(height: 16),
-            // Languages
+            // Languages placeholder
             Wrap(
-              children: staff['languages'].map<Widget>((language) {
+              children: ['English', 'Arabic'].map<Widget>((language) {
                 return Container(
                   margin: const EdgeInsets.only(right: 8, bottom: 4),
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -854,33 +906,57 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
     );
   }
 
+  Widget _buildDefaultAvatar(String type) {
+    return Container(
+      width: 60,
+      height: 60,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: _getGradientColors(type),
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: _getGradientColors(type)[0].withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Icon(
+        _getStaffIcon(type),
+        color: Colors.white,
+        size: 28,
+      ),
+    );
+  }
+
   List<Color> _getGradientColors(String type) {
-    switch (type) {
-      case 'Doctor':
-        return [AppTheme.primaryColor, AppTheme.secondaryColor];
-      case 'Nurse':
-        return [Colors.green, Colors.teal];
-      case 'Specialist':
-        return [Colors.purple, Colors.pink];
-      case 'Emergency':
-        return [Colors.red, Colors.orange];
-      default:
-        return [AppTheme.primaryColor, AppTheme.secondaryColor];
+    // Handle both French and English profession names
+    final lowerType = type.toLowerCase();
+    if (lowerType.contains('medecin') || lowerType.contains('doctor') || lowerType.contains('docteur')) {
+      return [AppTheme.primaryColor, AppTheme.secondaryColor];
+    } else if (lowerType.contains('infirmier') || lowerType.contains('nurse')) {
+      return [Colors.green, Colors.teal];
+    } else if (lowerType.contains('specialist')) {
+      return [Colors.purple, Colors.pink];
+    } else if (lowerType.contains('emergency') || lowerType.contains('urgence')) {
+      return [Colors.red, Colors.orange];
     }
+    return [AppTheme.primaryColor, AppTheme.secondaryColor];
   }
 
   IconData _getStaffIcon(String type) {
-    switch (type) {
-      case 'Doctor':
-        return Icons.medical_services_rounded;
-      case 'Nurse':
-        return Icons.local_hospital_rounded;
-      case 'Specialist':
-        return Icons.psychology_rounded;
-      case 'Emergency':
-        return Icons.emergency_rounded;
-      default:
-        return Icons.person_rounded;
+    final lowerType = type.toLowerCase();
+    if (lowerType.contains('medecin') || lowerType.contains('doctor') || lowerType.contains('docteur')) {
+      return Icons.medical_services_rounded;
+    } else if (lowerType.contains('infirmier') || lowerType.contains('nurse')) {
+      return Icons.local_hospital_rounded;
+    } else if (lowerType.contains('specialist')) {
+      return Icons.psychology_rounded;
+    } else if (lowerType.contains('emergency') || lowerType.contains('urgence')) {
+      return Icons.emergency_rounded;
     }
+    return Icons.person_rounded;
   }
 }

@@ -92,9 +92,9 @@ class ProviderRequestService {
     print('   💰 prix: $prix  paymentMethod: $paymentMethod');
     print('   📍 patientLocation: ${patientLocation.latitude}, ${patientLocation.longitude}');
 
-    // Calculate expireAt: 10 minutes from now
+    // Calculate expireAt: 60 minutes from now (increased for better testing)
     final now = DateTime.now();
-    final expireAt = Timestamp.fromDate(now.add(const Duration(minutes: 10)));
+    final expireAt = Timestamp.fromDate(now.add(const Duration(minutes: 60)));
 
     final data = {
       'patientId': user.uid,

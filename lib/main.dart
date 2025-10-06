@@ -43,8 +43,10 @@ import 'firebase_options.dart';
 import 'package:firstv/services/real_time_role_service.dart';
 import 'package:firstv/screens/admin/admin_dashboard_screen.dart';
 
+// Debug/Test Screens
 // import 'package:firstv/screens/debug/role_debug_screen.dart';
 // import 'package:firstv/screens/test/provider_auth_test_screen.dart';
+import 'package:firstv/screens/debug/test_provider_request_screen.dart';
 
 // Global navigator key for app-wide navigation
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -225,7 +227,8 @@ class MyApp extends StatelessWidget {
         AppRoutes.enhancedAppointmentManagement: (context) => const EnhancedAppointmentManagementScreen(),
         // Admin Routes
         '/admin-dashboard': (context) => const AdminDashboardScreen(),
-        // Debug Routes (temporarily disabled)
+        // Debug/Test Routes
+        '/test-provider-request': (context) => const TestProviderRequestScreen(),
         // '/role-debug': (context) => const RoleDebugScreen(),
         // AppRoutes.providerAuthTest: (context) => const ProviderAuthTestScreen(),
 

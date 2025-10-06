@@ -28,6 +28,19 @@
                     "order": "DESCENDING"
                 }
             ]
+        },
+        {
+            "collectionGroup": "professionals",
+            "queryScope": "COLLECTION",
+            "fields": [{
+                    "fieldPath": "profession",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "rating",
+                    "order": "DESCENDING"
+                }
+            ]
         }
     ],
     "fieldOverrides": []

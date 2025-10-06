@@ -35,6 +35,8 @@ class RoleRedirectService {
           return '/home';
         case 'doctor':
         case 'docteur':
+        case 'infirmier':
+        case 'nurse':
         case 'professional':
           return '/provider-dashboard';
         case 'admin':
@@ -82,6 +84,8 @@ class RoleRedirectService {
         return collection == 'patients';
       case 'doctor':
       case 'docteur':
+      case 'infirmier':
+      case 'nurse':
       case 'professional':
         return collection == 'professionals';
       default:
@@ -111,17 +115,29 @@ class RoleRedirectService {
         case 'doctor':
         case 'docteur':
         case 'professional':
+        case 'infirmier':
+        case 'nurse':
           targetCollection = 'professionals'; // Use professionals collection as specified
+          
+          // Determine profession based on role
+          String profession = 'medecin';
+          if (role == 'infirmier' || role == 'nurse') {
+            profession = 'infirmier';
+          }
+          
           defaultData = {
-            'bio': 'Médecin spécialisé avec plusieurs années d\'expérience.',
-            'disponible': true,
-            'id_user': userId,
-            'idpro': 'doc_${userId.substring(0, 8)}', // Generate doctor ID
-            'login': 'login_${userId.substring(0, 8)}',
-            'profession': 'medecin',
-            'rating': '0.0',
-            'service': 'consultation',
+            'profession': profession,
             'specialite': 'generaliste',
+            'service': 'consultation',
+            'disponible': true,
+            'rating': 0.0,
+            'reviewsCount': 0,
+            'prix': 100,
+            'bio': '',
+            'login': 'user_${userId.substring(0, 8)}',
+            'id_user': userId,
+            'createdAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
           };
           break;
         

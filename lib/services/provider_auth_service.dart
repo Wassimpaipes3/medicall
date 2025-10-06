@@ -28,7 +28,11 @@ class ProviderAuthService {
       final userData = userDoc.data() as Map<String, dynamic>;
       final role = userData['role'] as String?;
       
-      if (role != 'doctor' && role != 'docteur' && role != 'professional') {
+      if (role != 'doctor' && 
+          role != 'docteur' && 
+          role != 'infirmier' && 
+          role != 'nurse' && 
+          role != 'professional') {
         print('❌ User is not a provider. Role: $role');
         return null;
       }
@@ -177,7 +181,11 @@ class ProviderAuthService {
       final userData = userDoc.data() as Map<String, dynamic>;
       final role = userData['role'] as String?;
       
-      return role == 'doctor' || role == 'docteur' || role == 'professional';
+      return role == 'doctor' || 
+             role == 'docteur' || 
+             role == 'infirmier' ||
+             role == 'nurse' ||
+             role == 'professional';
     } catch (e) {
       print('❌ Error checking provider status: $e');
       return false;

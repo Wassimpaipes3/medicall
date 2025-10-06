@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
 import '../../core/services/call_service.dart';
 import '../../widgets/common/custom_app_bar.dart';
-import '../../widgets/top_doctors_section.dart';
 import '../../controllers/navigation_controller.dart';
 import '../../data/services/appointment_storage.dart';
 import '../../widgets/chat/chat_navigation_helper.dart';
@@ -40,10 +41,20 @@ class _HomeScreenState extends State<HomeScreen>
   // Services
   final NavigationController _navController = NavigationController();
   
+  // Firebase
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  
   // Dynamic Stats
   int _appointmentCount = 0;
+  int _doctorsCount = 0;
   
-  // Mock Data for Top Doctors
+  // Firestore Streams
+  Stream<QuerySnapshot>? _topDoctorsStream;
+  Stream<int>? _doctorsCountStream;
+  Stream<int>? _appointmentsCountStream;
+  
+  // Mock Data for Top Doctors (fallback)
   final List<Map<String, dynamic>> _topDoctors = [
     {
       'id': 'dr_sarah',
@@ -117,6 +128,7 @@ class _HomeScreenState extends State<HomeScreen>
     _initializeAnimations();
     _startAnimations();
     _loadAppointmentCount();
+    _initializeFirestoreStreams();
     
     // Listen to navigation controller changes
     _navController.addListener(_onNavigationStateChanged);
@@ -128,6 +140,56 @@ class _HomeScreenState extends State<HomeScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _navController.setCurrentIndex(0); // Set home as active
     });
+  }
+  
+  void _initializeFirestoreStreams() {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null) return;
+    
+    // Stream for top doctors (top 5 by rating)
+    // We'll need to enrich this with user data for profile images
+    _topDoctorsStream = _firestore
+        .collection('professionals')
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .orderBy('rating', descending: true)
+        .limit(5)
+        .snapshots();
+    
+    // Stream for total doctors count
+    _doctorsCountStream = _firestore
+        .collection('professionals')
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+    
+    // Stream for user's appointments count
+    _appointmentsCountStream = _firestore
+        .collection('appointments')
+        .where('patientId', isEqualTo: currentUser.uid)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+    
+    // Listen to doctors count
+    _doctorsCountStream?.listen((count) {
+      if (mounted) {
+        setState(() {
+          _doctorsCount = count;
+        });
+      }
+    });
+  }
+  
+  // Fetch user profile data to get photo_profile
+  Future<Map<String, dynamic>?> _getUserProfile(String userId) async {
+    try {
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        return userDoc.data();
+      }
+    } catch (e) {
+      print('Error fetching user profile for $userId: $e');
+    }
+    return null;
   }
 
   @override
@@ -379,15 +441,8 @@ class _HomeScreenState extends State<HomeScreen>
                       // Quick Stats Section
                       _buildQuickStatsSection(),
                     
-                    // Top Doctors Section
-                    TopDoctorsSection(
-                      doctors: _topDoctors,
-                      onViewAll: _navigateToAllDoctors,
-                      onBookDoctor: _bookDoctor,
-                      onChatDoctor: _chatWithDoctor,
-                      onCallDoctor: _callDoctor,
-                      staggerAnimation: _staggerAnimation,
-                    ),
+                    // Top Doctors Section (Real-time Firestore)
+                    _buildTopDoctorsSection(),
                     
                     // Healthcare Booking Section - New comprehensive system
                     _buildHealthcareBookingSection(),
@@ -512,7 +567,7 @@ class _HomeScreenState extends State<HomeScreen>
               const SizedBox(width: 12),
               _buildStatCard(
                 'Doctors',
-                '8',
+                _doctorsCount.toString(),
                 Icons.local_hospital,
                 AppTheme.secondaryColor,
                 0.2,
@@ -742,24 +797,13 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
           const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: _buildServiceButton(
-                  'Book Doctor',
-                  Icons.local_hospital,
-                  () => _navigateToBookingFlow(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildServiceButton(
-                  'Book Nurse',
-                  Icons.health_and_safety,
-                  () => _navigateToBookingFlow(),
-                ),
-              ),
-            ],
+          SizedBox(
+            width: double.infinity,
+            child: _buildServiceButton(
+              'Book Healthcare Professional',
+              Icons.medical_services_rounded,
+              () => _navigateToBookingFlow(),
+            ),
           ),
           const SizedBox(height: 12),
           // Test Notification Button
@@ -880,6 +924,572 @@ class _HomeScreenState extends State<HomeScreen>
               child: Text('Cancel'),
             ),
           ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTopDoctorsSection() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _topDoctorsStream,
+      builder: (context, snapshot) {
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Top Doctors',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _navigateToAllDoctors,
+                    child: Row(
+                      children: [
+                        Text(
+                          'View All',
+                          style: TextStyle(
+                            color: AppTheme.primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.primaryColor),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              // Loading/Error/Data States
+              if (!snapshot.hasData)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(40),
+                    child: CircularProgressIndicator(color: AppTheme.primaryColor),
+                  ),
+                )
+              else if (snapshot.hasError)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      'Error loading doctors: ${snapshot.error}',
+                      style: TextStyle(color: Colors.red),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                )
+              else if (snapshot.data!.docs.isEmpty)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Text(
+                      'No doctors available',
+                      style: TextStyle(color: AppTheme.textSecondaryColor),
+                    ),
+                  ),
+                )
+              else
+                SizedBox(
+                  height: 260,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    itemCount: snapshot.data!.docs.length,
+                    itemBuilder: (context, index) {
+                      final doc = snapshot.data!.docs[index];
+                      final doctorData = doc.data() as Map<String, dynamic>;
+                      print('DEBUG: Doctor card data for ${doctorData['name']}: $doctorData');
+                      return _buildDoctorCard(doctorData, doc.id);
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+  
+  Widget _buildFallbackAvatar() {
+    return Container(
+      width: 70,
+      height: 70,
+      decoration: BoxDecoration(
+        color: AppTheme.primaryColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(35),
+      ),
+      child: Icon(
+        Icons.person_rounded,
+        size: 40,
+        color: AppTheme.primaryColor,
+      ),
+    );
+  }
+  
+  Widget _buildDoctorCard(Map<String, dynamic> doctor, String doctorId) {
+    // Handle actual Firestore field names from your database
+    final userId = doctor['id_user'] as String?;
+    
+    // Get specialty from professionals collection
+    final specialty = doctor['specialite'] 
+        ?? doctor['service']
+        ?? doctor['specialization'] 
+        ?? doctor['specialty']
+        ?? 'General';
+    
+    final profession = doctor['profession'] ?? 'medecin';
+    final rating = ((doctor['rating'] ?? 0.0) is int) ? (doctor['rating'] as int).toDouble() : (doctor['rating'] ?? 0.0).toDouble();
+    final experience = doctor['yearsOfExperience'] ?? doctor['experience'] ?? doctor['annees_experience'] ?? 5;
+    final isOnline = doctor['disponible'] ?? doctor['isOnline'] ?? false;
+    
+    // The profile image will be fetched from users collection using id_user
+    final profileImageFromDoc = doctor['photo_profile'] ?? doctor['profileImage'] ?? doctor['avatar'] ?? doctor['photoURL'] ?? doctor['photo'] ?? doctor['image_url'];
+    
+    // Validate image URL
+    String? profileImage;
+    if (profileImageFromDoc != null) {
+      final imageStr = profileImageFromDoc.toString().trim();
+      if (imageStr.isNotEmpty && imageStr != 'null') {
+        profileImage = imageStr;
+      }
+    }
+    
+    // Format profession display
+    String professionDisplay = profession;
+    if (profession == 'medecin' || profession == 'doctor' || profession == 'docteur') {
+      professionDisplay = 'Doctor';
+    } else if (profession == 'infirmier' || profession == 'nurse') {
+      professionDisplay = 'Nurse';
+    }
+    
+    return GestureDetector(
+      onTap: () => _showDoctorActionsBottomSheet(doctor),
+      child: Container(
+        width: 180,
+        height: 260,
+        margin: const EdgeInsets.only(right: 16),
+        decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryColor.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Doctor Image with Rating Badge and Online Status
+          Stack(
+            children: [
+              Container(
+                height: 110,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppTheme.primaryColor.withOpacity(0.2),
+                      AppTheme.secondaryColor.withOpacity(0.2),
+                    ],
+                  ),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(20),
+                    topRight: Radius.circular(20),
+                  ),
+                ),
+                child: Center(
+                  // If we have userId but no image in current doc, fetch from users collection
+                  child: userId != null && profileImage == null
+                      ? FutureBuilder<Map<String, dynamic>?>(
+                          future: _getUserProfile(userId),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return Container(
+                                width: 70,
+                                height: 70,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[200],
+                                  borderRadius: BorderRadius.circular(35),
+                                ),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppTheme.primaryColor,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
+                            
+                            final userData = snapshot.data;
+                            final userImage = userData?['photo_profile'];
+                            
+                            if (userImage != null && userImage.toString().trim().isNotEmpty) {
+                              return ClipRRect(
+                                borderRadius: BorderRadius.circular(35),
+                                child: Image.network(
+                                  userImage.toString(),
+                                  width: 70,
+                                  height: 70,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    print('❌ Image load error: $error (URL: $userImage)');
+                                    return _buildFallbackAvatar();
+                                  },
+                                ),
+                              );
+                            }
+                            
+                            return _buildFallbackAvatar();
+                          },
+                        )
+                      : profileImage != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(35),
+                              child: Image.network(
+                                profileImage,
+                                width: 70,
+                                height: 70,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Container(
+                                    width: 70,
+                                    height: 70,
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[200],
+                                      borderRadius: BorderRadius.circular(35),
+                                    ),
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppTheme.primaryColor,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  print('❌ Image load error: $error (URL: $profileImage)');
+                                  return _buildFallbackAvatar();
+                                },
+                              ),
+                            )
+                          : _buildFallbackAvatar(),
+                ),
+              ),
+              // Rating Badge
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.orange.withOpacity(0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.star, color: Colors.white, size: 12),
+                      const SizedBox(width: 4),
+                      Text(
+                        rating.toStringAsFixed(1),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // Online Status
+              Positioned(
+                bottom: 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isOnline ? Colors.green : Colors.grey,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isOnline ? Colors.green : Colors.grey).withOpacity(0.3),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.circle, color: Colors.white, size: 8),
+                      const SizedBox(width: 4),
+                      Text(
+                        isOnline ? 'Available' : 'Offline',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // Doctor Info Section
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Name from users collection
+                  userId != null
+                      ? FutureBuilder<Map<String, dynamic>?>(
+                          future: _getUserProfile(userId),
+                          builder: (context, snapshot) {
+                            String displayName = 'Dr. ${doctor['login'] ?? 'Professional'}';
+                            
+                            if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+                              final userData = snapshot.data;
+                              final nom = userData?['nom'] ?? '';
+                              final prenom = userData?['prenom'] ?? '';
+                              
+                              if (nom.isNotEmpty && prenom.isNotEmpty) {
+                                displayName = 'Dr. $prenom $nom';
+                              } else if (nom.isNotEmpty) {
+                                displayName = 'Dr. $nom';
+                              } else if (prenom.isNotEmpty) {
+                                displayName = 'Dr. $prenom';
+                              }
+                            }
+                            
+                            return Text(
+                              displayName,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.textPrimaryColor,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            );
+                          },
+                        )
+                      : Text(
+                          'Dr. ${doctor['login'] ?? 'Professional'}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.textPrimaryColor,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                  const SizedBox(height: 4),
+                  
+                  // Profession Badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          profession.contains('nurse') || profession.contains('infirmier')
+                              ? Icons.health_and_safety_rounded
+                              : Icons.local_hospital_rounded,
+                          size: 10,
+                          color: AppTheme.primaryColor,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          professionDisplay,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: AppTheme.primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  
+                  // Specialty
+                  Row(
+                    children: [
+                      Icon(Icons.medical_services_outlined, 
+                          size: 11, 
+                          color: AppTheme.textSecondaryColor),
+                      const SizedBox(width: 3),
+                      Expanded(
+                        child: Text(
+                          specialty,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondaryColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  
+                  // Experience
+                  Row(
+                    children: [
+                      Icon(Icons.work_outline_rounded, 
+                          size: 11, 
+                          color: AppTheme.textSecondaryColor),
+                      const SizedBox(width: 3),
+                      Text(
+                        '$experience years exp.',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.textSecondaryColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+      ),
+    );
+  }
+  
+  void _showDoctorActionsBottomSheet(Map<String, dynamic> doctor) {
+    final userId = doctor['id_user'] as String?;
+    final specialty = doctor['specialite'] ?? doctor['service'] ?? doctor['specialization'] ?? doctor['specialty'] ?? 'General';
+    
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Fetch name from users collection
+              userId != null
+                  ? FutureBuilder<Map<String, dynamic>?>(
+                      future: _getUserProfile(userId),
+                      builder: (context, snapshot) {
+                        String displayName = 'Dr. ${doctor['login'] ?? 'Professional'}';
+                        
+                        if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+                          final userData = snapshot.data;
+                          final nom = userData?['nom'] ?? '';
+                          final prenom = userData?['prenom'] ?? '';
+                          
+                          if (nom.isNotEmpty && prenom.isNotEmpty) {
+                            displayName = 'Dr. $prenom $nom';
+                          } else if (nom.isNotEmpty) {
+                            displayName = 'Dr. $nom';
+                          } else if (prenom.isNotEmpty) {
+                            displayName = 'Dr. $prenom';
+                          }
+                        }
+                        
+                        return Text(
+                          displayName,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      },
+                    )
+                  : Text(
+                      'Dr. ${doctor['login'] ?? 'Professional'}',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+              Text(
+                specialty,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: AppTheme.textSecondaryColor,
+                ),
+              ),
+              const SizedBox(height: 24),
+              ListTile(
+                leading: Icon(Icons.medical_services, color: AppTheme.primaryColor),
+                title: const Text('Book Appointment'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _bookDoctor(doctor);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.chat, color: AppTheme.primaryColor),
+                title: const Text('Chat'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _chatWithDoctor(doctor);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.phone, color: AppTheme.primaryColor),
+                title: const Text('Call'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _callDoctor(doctor);
+                },
+              ),
+            ],
+          ),
         );
       },
     );

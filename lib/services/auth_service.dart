@@ -559,6 +559,9 @@ class AuthService {
         return '/patient-navigation';
       case 'provider':
       case 'doctor':
+      case 'docteur':
+      case 'infirmier':
+      case 'nurse':
         return '/provider-dashboard';
       default:
         // Default to patient navigation if role is not found or unknown
@@ -568,6 +571,8 @@ class AuthService {
   }
 
   // Set user role in Firestore (useful for testing or admin purposes)
+  // ⚠️ DEPRECATED: Use RealTimeRoleService.adminChangeUserRole() instead
+  // This function only updates the role field and does NOT migrate collections
   Future<bool> setUserRole(String role) async {
     try {
       final user = await currentUser;
@@ -576,12 +581,18 @@ class AuthService {
         return false;
       }
 
+      print('⚠️ WARNING: setUserRole() does not migrate collections!');
+      print('⚠️ Use RealTimeRoleService.adminChangeUserRole() for proper role changes');
+      
+      // For backward compatibility, still update the role field
+      // But log a warning since this won't migrate collections
       final firestore = FirebaseFirestore.instance;
       await firestore.collection('users').doc(user.uid).update({
         'role': role,
       });
       
-      print('✅ User role updated to: $role');
+      print('✅ User role field updated to: $role');
+      print('⚠️ NOTE: User still in old collection - use adminChangeUserRole() to migrate');
       return true;
     } catch (e) {
       print('❌ Error setting user role: $e');

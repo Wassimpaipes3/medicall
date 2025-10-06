@@ -70,7 +70,7 @@ class _ArrivedConfirmationScreenState extends State<ArrivedConfirmationScreen>
           .collection('appointments')
           .doc(widget.appointmentId)
           .update({
-        'etat': 'terminé',
+        'status': 'completed',
         'completedAt': FieldValue.serverTimestamp(),
       });
 

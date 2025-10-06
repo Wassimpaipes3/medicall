@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'real_time_role_service.dart';
 
 /// Utility class for testing role changes and document structure
 class RoleTestUtility {
@@ -29,16 +30,21 @@ class RoleTestUtility {
       
       print('👤 Found user: $userId');
 
-      // Update user role
-      await _firestore.collection('users').doc(userId).update({
-        'role': newRole,
-        'role_changed_at': FieldValue.serverTimestamp(),
-        'role_changed_by': 'test_admin',
-        'role_change_reason': 'Manual test role change',
-      });
+      // ✅ Use proper admin role change function that migrates collections
+      final success = await RealTimeRoleService.adminChangeUserRole(
+        targetUserId: userId,
+        newRole: newRole,
+        adminUserId: 'test_admin',
+        reason: 'Manual test role change',
+      );
 
-      print('✅ User role updated to: $newRole');
-      print('🔄 Real-time listeners should detect this change automatically');
+      if (success) {
+        print('✅ User role updated to: $newRole');
+        print('✅ Collections migrated successfully');
+        print('🔄 Real-time listeners should detect this change automatically');
+      } else {
+        print('❌ Role change failed');
+      }
       
     } catch (e) {
       print('❌ Error in test role change: $e');

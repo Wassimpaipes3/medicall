@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../widgets/booking/ServiceSelectionPage.dart';
 import '../../widgets/patient/patient_navigation_bar.dart';
 import '../../core/theme.dart';
@@ -21,50 +22,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late AnimationController _slideController;
   late AnimationController _pulseController;
   late AnimationController _staggerController;
-  late AnimationController _bounceController;
   
   // Animations
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _pulseAnimation;
-  late Animation<double> _bounceAnimation;
   
   // State Variables
   final TextEditingController _searchController = TextEditingController();
   int _selectedBottomIndex = 0;
-  bool _nursingLevelExpanded = false;
   
-  // Mock Data
-  final List<Map<String, dynamic>> _topMedicalStaff = [
-    {
-      'name': 'Dr. Sarah Johnson',
-      'specialty': 'Cardiologist',
-      'rating': 4.9,
-      'avatar': 'assets/images/doctor1.png',
-      'available': true,
-    },
-    {
-      'name': 'Nurse Lisa Chen',
-      'specialty': 'Critical Care',
-      'rating': 4.8,
-      'avatar': 'assets/images/nurse1.png',
-      'available': true,
-    },
-    {
-      'name': 'Dr. Ahmed Hassan',
-      'specialty': 'General Medicine',
-      'rating': 4.7,
-      'avatar': 'assets/images/doctor2.png',
-      'available': false,
-    },
-    {
-      'name': 'Nurse Maria Garcia',
-      'specialty': 'Pediatric Care',
-      'rating': 4.9,
-      'avatar': 'assets/images/nurse2.png',
-      'available': true,
-    },
-  ];
+  // Firestore
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  
+  // Real-time data streams
+  Stream<QuerySnapshot>? _topDoctorsStream;
+  Stream<int>? _doctorsCountStream;
+  Stream<int>? _appointmentsCountStream;
   
   final List<Map<String, dynamic>> _healthUpdates = [
     {
@@ -101,6 +76,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _initializeAnimations();
+    _initializeFirestoreStreams();
+  }
+
+  void _initializeFirestoreStreams() {
+    // Stream for top 5 doctors ordered by rating
+    _topDoctorsStream = _firestore
+        .collection('professionals')
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .orderBy('rating', descending: true)
+        .limit(5)
+        .snapshots();
+    
+    // Stream for total doctors count
+    _doctorsCountStream = _firestore
+        .collection('professionals')
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+    
+    // Stream for user's appointments count
+    final currentUserId = _auth.currentUser?.uid;
+    if (currentUserId != null) {
+      _appointmentsCountStream = _firestore
+          .collection('appointments')
+          .where('patientId', isEqualTo: currentUserId)
+          .snapshots()
+          .map((snapshot) => snapshot.docs.length);
+    }
   }
 
   void _initializeAnimations() {
@@ -122,11 +125,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     
     _staggerController = AnimationController(
       duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-    
-    _bounceController = AnimationController(
-      duration: const Duration(milliseconds: 600),
       vsync: this,
     );
     
@@ -155,14 +153,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       curve: Curves.easeInOut,
     ));
     
-    _bounceAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _bounceController,
-      curve: Curves.elasticOut,
-    ));
-    
     // Start animations
     _fadeController.forward();
     _slideController.forward();
@@ -172,11 +162,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     Future.delayed(const Duration(milliseconds: 300), () {
       _staggerController.forward();
     });
-    
-    // Bounce animation for staff cards
-    Future.delayed(const Duration(milliseconds: 500), () {
-      _bounceController.forward();
-    });
   }
 
   @override
@@ -185,7 +170,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _slideController.dispose();
     _pulseController.dispose();
     _staggerController.dispose();
-    _bounceController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -434,103 +418,117 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget _buildNursingLevelIndicator() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          setState(() {
-            _nursingLevelExpanded = !_nursingLevelExpanded;
-          });
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                AppTheme.primaryColor.withOpacity(0.1),
-                AppTheme.secondaryColor.withOpacity(0.1),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: AppTheme.primaryColor.withOpacity(0.3),
-              width: 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryColor,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'Level 2',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  
-                  const SizedBox(width: 12),
-                  
-                  Expanded(
-                    child: Text(
-                      'Intermediate Care',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimaryColor,
-                      ),
-                    ),
-                  ),
-                  
-                  AnimatedRotation(
-                    turns: _nursingLevelExpanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 300),
-                    child: Icon(
-                      Icons.expand_more,
-                      color: AppTheme.primaryColor,
-                    ),
-                  ),
-                ],
-              ),
-              
-              // Progress Bar
-              const SizedBox(height: 12),
-              LinearProgressIndicator(
-                value: 0.6,
-                backgroundColor: AppTheme.primaryColor.withOpacity(0.2),
-                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
-                minHeight: 4,
-              ),
-              
-              // Expanded Details
-              AnimatedCrossFade(
-                duration: const Duration(milliseconds: 300),
-                crossFadeState: _nursingLevelExpanded 
-                    ? CrossFadeState.showSecond 
-                    : CrossFadeState.showFirst,
-                firstChild: const SizedBox(),
-                secondChild: Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    'You are receiving intermediate nursing care. Regular monitoring and medication assistance are provided.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppTheme.textSecondaryColor,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppTheme.primaryColor.withOpacity(0.1),
+              AppTheme.secondaryColor.withOpacity(0.1),
             ],
           ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: AppTheme.primaryColor.withOpacity(0.3),
+            width: 1,
+          ),
         ),
+        child: Row(
+          children: [
+            // Doctors Count
+            Expanded(
+              child: StreamBuilder<int>(
+                stream: _doctorsCountStream,
+                builder: (context, snapshot) {
+                  final count = snapshot.data ?? 0;
+                  return _buildStatItem(
+                    icon: Icons.medical_services_rounded,
+                    label: 'Doctors',
+                    value: count.toString(),
+                    color: AppTheme.primaryColor,
+                  );
+                },
+              ),
+            ),
+            
+            Container(
+              width: 1,
+              height: 50,
+              color: AppTheme.primaryColor.withOpacity(0.3),
+            ),
+            
+            // Appointments Count
+            Expanded(
+              child: StreamBuilder<int>(
+                stream: _appointmentsCountStream,
+                builder: (context, snapshot) {
+                  final count = snapshot.data ?? 0;
+                  return _buildStatItem(
+                    icon: Icons.calendar_today_rounded,
+                    label: 'Appointments',
+                    value: count.toString(),
+                    color: AppTheme.secondaryColor,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatItem({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              color: color,
+              size: 20,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textPrimaryColor,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppTheme.textSecondaryColor,
+              fontSize: 11,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -616,7 +614,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
               const SizedBox(width: 8),
               Text(
-                'Top Doctors & Nurses',
+                'Top Doctors',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: AppTheme.textPrimaryColor,
@@ -626,146 +624,242 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
         ),
         
-        SizedBox(
-          height: 180,
-          child: ListView.builder(
-            physics: const BouncingScrollPhysics(),
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _topMedicalStaff.length,
-            itemBuilder: (context, index) {
-              final staff = _topMedicalStaff[index];
+        StreamBuilder<QuerySnapshot>(
+          stream: _topDoctorsStream,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Text('Error: ${snapshot.error}'),
+              );
+            }
+
+            if (!snapshot.hasData) {
+              return const SizedBox(
+                height: 200,
+                child: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+            }
+
+            final doctors = snapshot.data!.docs;
+
+            if (doctors.isEmpty) {
+              return const SizedBox(
+                height: 200,
+                child: Center(
+                  child: Text('No doctors available'),
+                ),
+              );
+            }
+
+            return SizedBox(
+              height: 220,
+              child: ListView.builder(
+                physics: const BouncingScrollPhysics(),
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                itemCount: doctors.length,
+                itemBuilder: (context, index) {
+                  final doctorData = doctors[index].data() as Map<String, dynamic>;
+                  final name = doctorData['name'] ?? doctorData['fullName'] ?? 'Doctor';
+                  final specialty = doctorData['specialization'] ?? doctorData['specialty'] ?? 'General';
+                  final rating = (doctorData['rating'] ?? 0.0).toDouble();
+                  final yearsExp = doctorData['yearsOfExperience'] ?? doctorData['experience'] ?? 0;
+                  final isAvailable = doctorData['isOnline'] ?? false;
+                  final profileImage = doctorData['profileImage'] ?? doctorData['avatar'];
               
-              return AnimatedBuilder(
-                animation: _staggerController,
-                builder: (context, child) {
-                  double delay = index * 0.2;
-                  double animationValue = (_staggerController.value - delay).clamp(0.0, 1.0);
-                  
-                  return Transform.translate(
-                    offset: Offset(0, 50 * (1 - animationValue)),
-                    child: Opacity(
-                      opacity: animationValue,
-                      child: ScaleTransition(
-                        scale: _bounceAnimation,
-                        child: Container(
-                          width: 140,
-                          margin: const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 16,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                          ),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: () {
-                                HapticFeedback.selectionClick();
-                                // Handle staff selection
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Column(
-                                  children: [
-                                    // Avatar
-                                    Container(
-                                      width: 60,
-                                      height: 60,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            AppTheme.primaryColor,
-                                            AppTheme.secondaryColor,
-                                          ],
-                                        ),
-                                      ),
-                                      child: const Icon(
-                                        Icons.person,
-                                        color: Colors.white,
-                                        size: 30,
-                                      ),
-                                    ),
-                                    
-                                    const SizedBox(height: 12),
-                                    
-                                    // Name
-                                    Text(
-                                      staff['name'],
-                                      textAlign: TextAlign.center,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                        color: AppTheme.textPrimaryColor,
-                                      ),
-                                    ),
-                                    
-                                    const SizedBox(height: 4),
-                                    
-                                    // Specialty
-                                    Text(
-                                      staff['specialty'],
-                                      textAlign: TextAlign.center,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: AppTheme.textSecondaryColor,
-                                      ),
-                                    ),
-                                    
-                                    const SizedBox(height: 8),
-                                    
-                                    // Rating & Availability
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.star_rounded,
-                                          color: AppTheme.medicalOrange,
-                                          size: 12,
-                                        ),
-                                        const SizedBox(width: 2),
-                                        Text(
-                                          staff['rating'].toString(),
-                                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                            color: AppTheme.textPrimaryColor,
+                  return Container(
+                    width: 170,
+                    margin: const EdgeInsets.only(right: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.08),
+                          blurRadius: 16,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          // Handle doctor selection
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Avatar with availability indicator
+                              Row(
+                                children: [
+                                  Stack(
+                                    children: [
+                                      Container(
+                                        width: 50,
+                                        height: 50,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              AppTheme.primaryColor,
+                                              AppTheme.secondaryColor,
+                                            ],
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
-                                        Container(
-                                          width: 6,
-                                          height: 6,
-                                          decoration: BoxDecoration(
-                                            color: staff['available'] 
-                                                ? AppTheme.successColor 
-                                                : AppTheme.medicalRed,
-                                            shape: BoxShape.circle,
+                                        child: profileImage != null
+                                            ? ClipOval(
+                                                child: Image.network(
+                                                  profileImage,
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (_, __, ___) => const Icon(
+                                                    Icons.person,
+                                                    color: Colors.white,
+                                                    size: 25,
+                                                  ),
+                                                ),
+                                              )
+                                            : const Icon(
+                                                Icons.person,
+                                                color: Colors.white,
+                                                size: 25,
+                                              ),
+                                      ),
+                                      if (isAvailable)
+                                        Positioned(
+                                          right: 0,
+                                          bottom: 0,
+                                          child: Container(
+                                            width: 14,
+                                            height: 14,
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.successColor,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: Colors.white, width: 2),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const Spacer(),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.medicalOrange.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.star,
+                                          color: AppTheme.medicalOrange,
+                                          size: 14,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          rating.toStringAsFixed(1),
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppTheme.medicalOrange,
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ],
+                                  ),
+                                ],
+                              ),
+                              
+                              const SizedBox(height: 12),
+                              
+                              // Name
+                              Text(
+                                name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.textPrimaryColor,
                                 ),
                               ),
-                            ),
+                              
+                              const SizedBox(height: 4),
+                              
+                              // Specialty
+                              Text(
+                                specialty,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppTheme.textSecondaryColor,
+                                ),
+                              ),
+                              
+                              const SizedBox(height: 8),
+                              
+                              // Experience
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.work_outline,
+                                    size: 14,
+                                    color: AppTheme.textSecondaryColor,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    '$yearsExp years exp',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppTheme.textSecondaryColor,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              
+                              const SizedBox(height: 4),
+                              
+                              // Availability
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: isAvailable 
+                                          ? AppTheme.successColor 
+                                          : AppTheme.textSecondaryColor,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    isAvailable ? 'Available' : 'Offline',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: isAvailable 
+                                          ? AppTheme.successColor 
+                                          : AppTheme.textSecondaryColor,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ),
                   );
                 },
-              );
-            },
-          ),
+              ),
+            );
+          },
         ),
       ],
     );
@@ -949,9 +1043,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        'Book an Appointment',
+                        'Book Healthcare Professional',
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: 17,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),

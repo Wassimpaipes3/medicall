@@ -389,6 +389,16 @@ class ProviderService extends ChangeNotifier {
 
   Future<void> completeAppointment(String appointmentId) async {
     try {
+      // First update Firestore to persist the change
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(appointmentId)
+          .update({
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Then update local state
       final index = _activeAppointments.indexWhere((req) => req.id == appointmentId);
       if (index != -1) {
         final appointment = _activeAppointments[index].copyWith(
