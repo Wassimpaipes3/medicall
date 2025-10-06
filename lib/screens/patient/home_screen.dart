@@ -80,10 +80,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _initializeFirestoreStreams() {
-    // Stream for top 5 doctors ordered by rating
+    // Stream for top 5 doctors & nurses ordered by rating
     _topDoctorsStream = _firestore
         .collection('professionals')
-        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur', 'infirmier', 'nurse'])
         .orderBy('rating', descending: true)
         .limit(5)
         .snapshots();
@@ -614,7 +614,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
               const SizedBox(width: 8),
               Text(
-                'Top Doctors',
+                'Top Providers',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: AppTheme.textPrimaryColor,

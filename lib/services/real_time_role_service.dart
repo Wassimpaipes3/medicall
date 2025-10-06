@@ -270,9 +270,12 @@ class RealTimeRoleService extends ChangeNotifier {
           debugPrint('✅ Created patient document with medical fields');
         } else if (newCollection == 'professionals') {
           // Create professional document with required fields
+          final profession = _mapRoleToProfession(newRole);
+          final specialite = _getDefaultSpecialite(profession);
+          
           await firestore.collection('professionals').doc(targetUserId).set({
-            'profession': _mapRoleToProfession(newRole),
-            'specialite': 'generaliste',
+            'profession': profession,
+            'specialite': specialite,
             'service': 'consultation',
             'disponible': true,
             'rating': 0.0,
@@ -345,6 +348,14 @@ class RealTimeRoleService extends ChangeNotifier {
     }
     
     return 'medecin'; // Default to medecin
+  }
+  
+  /// Helper: Get default specialty based on profession
+  static String _getDefaultSpecialite(String profession) {
+    if (profession == 'infirmier') {
+      return 'soins infirmiers'; // Nursing care specialty
+    }
+    return 'generaliste'; // General practice for doctors
   }
 
   /// Initialize the service when app starts

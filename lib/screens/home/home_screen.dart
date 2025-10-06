@@ -54,7 +54,7 @@ class _HomeScreenState extends State<HomeScreen>
   Stream<int>? _doctorsCountStream;
   Stream<int>? _appointmentsCountStream;
   
-  // Mock Data for Top Doctors (fallback)
+  // Mock Data for Top Providers (fallback - doctors & nurses)
   final List<Map<String, dynamic>> _topDoctors = [
     {
       'id': 'dr_sarah',
@@ -146,11 +146,11 @@ class _HomeScreenState extends State<HomeScreen>
     final currentUser = _auth.currentUser;
     if (currentUser == null) return;
     
-    // Stream for top doctors (top 5 by rating)
+    // Stream for top doctors & nurses (top 5 by rating)
     // We'll need to enrich this with user data for profile images
     _topDoctorsStream = _firestore
         .collection('professionals')
-        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur', 'infirmier', 'nurse'])
         .orderBy('rating', descending: true)
         .limit(5)
         .snapshots();
@@ -441,7 +441,7 @@ class _HomeScreenState extends State<HomeScreen>
                       // Quick Stats Section
                       _buildQuickStatsSection(),
                     
-                    // Top Doctors Section (Real-time Firestore)
+                    // Top Providers Section (Doctors & Nurses - Real-time Firestore)
                     _buildTopDoctorsSection(),
                     
                     // Healthcare Booking Section - New comprehensive system
@@ -942,7 +942,7 @@ class _HomeScreenState extends State<HomeScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Top Doctors',
+                    'Top Providers',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
@@ -1282,7 +1282,10 @@ class _HomeScreenState extends State<HomeScreen>
                       ? FutureBuilder<Map<String, dynamic>?>(
                           future: _getUserProfile(userId),
                           builder: (context, snapshot) {
-                            String displayName = 'Dr. ${doctor['login'] ?? 'Professional'}';
+                            // Get title prefix based on profession
+                            final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+                            final titlePrefix = isNurse ? '' : 'Dr. ';
+                            String displayName = '$titlePrefix${doctor['login'] ?? 'Professional'}';
                             
                             if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
                               final userData = snapshot.data;
@@ -1290,11 +1293,11 @@ class _HomeScreenState extends State<HomeScreen>
                               final prenom = userData?['prenom'] ?? '';
                               
                               if (nom.isNotEmpty && prenom.isNotEmpty) {
-                                displayName = 'Dr. $prenom $nom';
+                                displayName = '$titlePrefix$prenom $nom';
                               } else if (nom.isNotEmpty) {
-                                displayName = 'Dr. $nom';
+                                displayName = '$titlePrefix$nom';
                               } else if (prenom.isNotEmpty) {
-                                displayName = 'Dr. $prenom';
+                                displayName = '$titlePrefix$prenom';
                               }
                             }
                             
@@ -1311,7 +1314,7 @@ class _HomeScreenState extends State<HomeScreen>
                           },
                         )
                       : Text(
-                          'Dr. ${doctor['login'] ?? 'Professional'}',
+                          '${profession.contains('nurse') || profession.contains('infirmier') ? '' : 'Dr. '}${doctor['login'] ?? 'Professional'}',
                           style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
@@ -1424,7 +1427,12 @@ class _HomeScreenState extends State<HomeScreen>
                   ? FutureBuilder<Map<String, dynamic>?>(
                       future: _getUserProfile(userId),
                       builder: (context, snapshot) {
-                        String displayName = 'Dr. ${doctor['login'] ?? 'Professional'}';
+                        // Get title prefix based on profession
+                        final isNurse = specialty.toLowerCase().contains('infirm') || 
+                                       specialty.toLowerCase().contains('nurse') ||
+                                       specialty.toLowerCase().contains('soins');
+                        final titlePrefix = isNurse ? '' : 'Dr. ';
+                        String displayName = '$titlePrefix${doctor['login'] ?? 'Professional'}';
                         
                         if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
                           final userData = snapshot.data;
@@ -1432,11 +1440,11 @@ class _HomeScreenState extends State<HomeScreen>
                           final prenom = userData?['prenom'] ?? '';
                           
                           if (nom.isNotEmpty && prenom.isNotEmpty) {
-                            displayName = 'Dr. $prenom $nom';
+                            displayName = '$titlePrefix$prenom $nom';
                           } else if (nom.isNotEmpty) {
-                            displayName = 'Dr. $nom';
+                            displayName = '$titlePrefix$nom';
                           } else if (prenom.isNotEmpty) {
-                            displayName = 'Dr. $prenom';
+                            displayName = '$titlePrefix$prenom';
                           }
                         }
                         
@@ -1450,7 +1458,7 @@ class _HomeScreenState extends State<HomeScreen>
                       },
                     )
                   : Text(
-                      'Dr. ${doctor['login'] ?? 'Professional'}',
+                      '${specialty.toLowerCase().contains('infirm') || specialty.toLowerCase().contains('nurse') || specialty.toLowerCase().contains('soins') ? '' : 'Dr. '}${doctor['login'] ?? 'Professional'}',
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,

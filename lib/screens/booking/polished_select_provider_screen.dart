@@ -257,7 +257,10 @@ class _PolishedSelectProviderScreenState extends State<PolishedSelectProviderScr
       if (userNom != null || userPrenom != null) {
         fullNameFromUsers = [userPrenom, userNom].where((s) => s != null && s.isNotEmpty).join(' ');
         if (fullNameFromUsers.isNotEmpty) {
-          fullNameFromUsers = 'Dr. $fullNameFromUsers';
+          // Only add Dr. prefix for doctors, not nurses
+          final profession = data["profession"] ?? '';
+          final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+          fullNameFromUsers = isNurse ? fullNameFromUsers : 'Dr. $fullNameFromUsers';
         }
       }
       

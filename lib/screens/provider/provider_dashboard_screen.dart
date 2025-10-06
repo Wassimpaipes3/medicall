@@ -390,7 +390,13 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Dr. ${_currentProviderProfile?.fullName ?? _currentProvider?.fullName ?? "Provider"}',
+                      () {
+                        final profession = _currentProviderProfile?.profession ?? _currentProvider?.specialty ?? '';
+                        final isNurse = profession.toLowerCase().contains('infirm') || profession.toLowerCase().contains('nurse');
+                        final prefix = isNurse ? '' : 'Dr. ';
+                        final name = _currentProviderProfile?.fullName ?? _currentProvider?.fullName ?? "Provider";
+                        return '$prefix$name';
+                      }(),
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,

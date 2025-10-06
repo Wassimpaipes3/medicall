@@ -119,15 +119,18 @@ class RoleRedirectService {
         case 'nurse':
           targetCollection = 'professionals'; // Use professionals collection as specified
           
-          // Determine profession based on role
+          // Determine profession and appropriate specialty based on role
           String profession = 'medecin';
+          String specialite = 'generaliste';
+          
           if (role == 'infirmier' || role == 'nurse') {
             profession = 'infirmier';
+            specialite = 'soins infirmiers'; // Nursing care specialty for nurses
           }
           
           defaultData = {
             'profession': profession,
-            'specialite': 'generaliste',
+            'specialite': specialite,
             'service': 'consultation',
             'disponible': true,
             'rating': 0.0,

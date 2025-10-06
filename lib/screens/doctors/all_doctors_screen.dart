@@ -54,10 +54,10 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
   }
 
   void _initializeFirestoreStream() {
-    // Fetch all doctors from professionals collection
+    // Fetch all healthcare providers (doctors and nurses) from professionals collection
     _doctorsStream = _firestore
         .collection('professionals')
-        .where('profession', whereIn: ['medecin', 'doctor', 'docteur'])
+        .where('profession', whereIn: ['medecin', 'doctor', 'docteur', 'infirmier', 'nurse'])
         .orderBy('rating', descending: true)
         .snapshots();
   }
@@ -233,7 +233,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text(
-          'Top Doctors',
+          'Top Providers',
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         backgroundColor: Colors.white,
@@ -383,7 +383,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                 Icon(Icons.error_outline, size: 64, color: Colors.red[400]),
                 const SizedBox(height: 16),
                 Text(
-                  'Error loading doctors',
+                  'Error loading providers',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -403,7 +403,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                 Icon(Icons.medical_services_outlined, size: 64, color: Colors.grey[400]),
                 const SizedBox(height: 16),
                 Text(
-                  'No doctors found',
+                  'No providers found',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -415,7 +415,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
           );
         }
 
-        // Filter doctors based on search and category
+        // Filter providers based on search and category
         final allDoctors = snapshot.data!.docs;
         final filteredDoctors = allDoctors.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
@@ -446,7 +446,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'No doctors found',
+                  'No providers found',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
@@ -568,7 +568,10 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                                 ? FutureBuilder<Map<String, dynamic>?>(
                                     future: _getUserProfile(userId),
                                     builder: (context, snapshot) {
-                                      String displayName = 'Dr. ${staff['login'] ?? 'Professional'}';
+                                      // Get title prefix based on profession
+                                      final isNurse = type.contains('nurse') || type.contains('infirmier');
+                                      final titlePrefix = isNurse ? '' : 'Dr. ';
+                                      String displayName = '$titlePrefix${staff['login'] ?? 'Professional'}';
                                       
                                       if (snapshot.connectionState == ConnectionState.done &&
                                           snapshot.hasData) {
@@ -577,11 +580,11 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                                         final prenom = userData?['prenom'] ?? '';
                                         
                                         if (nom.isNotEmpty && prenom.isNotEmpty) {
-                                          displayName = 'Dr. $prenom $nom';
+                                          displayName = '$titlePrefix$prenom $nom';
                                         } else if (nom.isNotEmpty) {
-                                          displayName = 'Dr. $nom';
+                                          displayName = '$titlePrefix$nom';
                                         } else if (prenom.isNotEmpty) {
-                                          displayName = 'Dr. $prenom';
+                                          displayName = '$titlePrefix$prenom';
                                         }
                                       }
                                       
@@ -596,7 +599,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                                     },
                                   )
                                 : Text(
-                                    'Dr. ${staff['login'] ?? 'Professional'}',
+                                    '${type.contains('nurse') || type.contains('infirmier') ? '' : 'Dr. '}${staff['login'] ?? 'Professional'}',
                                     style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w700,
@@ -618,7 +621,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '5 years • ${specialty}',
+                        '5 years • $specialty',
                         style: TextStyle(
                           fontSize: 12,
                           color: AppTheme.textSecondaryColor,
@@ -637,7 +640,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Consultation • \$${fee}',
+                    'Consultation • \$$fee',
                     style: TextStyle(
                       fontSize: 12,
                       color: AppTheme.textSecondaryColor,

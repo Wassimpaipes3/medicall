@@ -355,7 +355,13 @@ class _ProviderProfileScreenState extends State<ProviderProfileScreen>
             
             // Provider Info
             Text(
-              'Dr. ${_currentProviderProfile?.fullName ?? _currentProvider?.fullName ?? "Healthcare Provider"}',
+              () {
+                final profession = _currentProviderProfile?.profession ?? _currentProvider?.specialty ?? '';
+                final isNurse = profession.toLowerCase().contains('infirm') || profession.toLowerCase().contains('nurse');
+                final prefix = isNurse ? '' : 'Dr. ';
+                final name = _currentProviderProfile?.fullName ?? _currentProvider?.fullName ?? "Healthcare Provider";
+                return '$prefix$name';
+              }(),
               style: const TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/provider/provider_model.dart';
 import '../../data/models/location_models.dart' as location_models;
 
@@ -389,7 +390,7 @@ class ProviderService extends ChangeNotifier {
 
   Future<void> completeAppointment(String appointmentId) async {
     try {
-      // First update Firestore to persist the change
+      // 1. Update Firestore FIRST so patient can see status change
       await FirebaseFirestore.instance
           .collection('appointments')
           .doc(appointmentId)
@@ -398,7 +399,7 @@ class ProviderService extends ChangeNotifier {
         'completedAt': FieldValue.serverTimestamp(),
       });
       
-      // Then update local state
+      // 2. Then update local state
       final index = _activeAppointments.indexWhere((req) => req.id == appointmentId);
       if (index != -1) {
         final appointment = _activeAppointments[index].copyWith(
@@ -464,16 +465,12 @@ class ProviderService extends ChangeNotifier {
         case ProviderStatus.online:
         case ProviderStatus.inService:
           availabilityStatus = ProviderAvailabilityStatus.online;
-          break;
         case ProviderStatus.busy:
         case ProviderStatus.enRoute:
           availabilityStatus = ProviderAvailabilityStatus.busy;
-          break;
         case ProviderStatus.offline:
         case ProviderStatus.break_:
-        default:
           availabilityStatus = ProviderAvailabilityStatus.offline;
-          break;
       }
     } else if (status is ProviderAvailabilityStatus) {
       availabilityStatus = status;
