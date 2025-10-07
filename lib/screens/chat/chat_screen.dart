@@ -108,13 +108,34 @@ class _ChatScreenState extends State<ChatScreen>
 
         if (otherUserId.isEmpty) continue;
 
-        // Try to get provider info from professionals collection
+        // Get provider info from users collection first (for name and photo)
+        DocumentSnapshot? userDoc;
+        Map<String, dynamic>? userData;
+        try {
+          userDoc = await _firestore
+              .collection('users')
+              .doc(otherUserId)
+              .get();
+          
+          if (userDoc.exists) {
+            userData = userDoc.data() as Map<String, dynamic>?;
+          }
+        } catch (e) {
+          print('⚠️ Error getting user data: $e');
+        }
+
+        // Get provider info from professionals collection
         DocumentSnapshot? providerDoc;
+        Map<String, dynamic>? providerData;
         try {
           providerDoc = await _firestore
               .collection('professionals')
               .doc(otherUserId)
               .get();
+          
+          if (providerDoc.exists) {
+            providerData = providerDoc.data() as Map<String, dynamic>?;
+          }
         } catch (e) {
           // If not found, try patients collection (for testing)
           try {
@@ -122,15 +143,50 @@ class _ChatScreenState extends State<ChatScreen>
                 .collection('patients')
                 .doc(otherUserId)
                 .get();
+            
+            if (providerDoc.exists) {
+              providerData = providerDoc.data() as Map<String, dynamic>?;
+            }
           } catch (e) {
             continue;
           }
         }
 
-        if (!providerDoc.exists) continue;
-
-        final providerData = providerDoc.data() as Map<String, dynamic>?;
-        if (providerData == null) continue;
+        // Build provider name from users collection
+        String providerName = 'Provider';
+        if (userData != null) {
+          final prenom = userData['prenom'] ?? '';
+          final nom = userData['nom'] ?? '';
+          
+          // Get profession and apply correct prefix
+          final profession = providerData?['profession'] ?? '';
+          final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+          final titlePrefix = isNurse ? '' : 'Dr. ';
+          
+          if (prenom.isNotEmpty || nom.isNotEmpty) {
+            providerName = '$titlePrefix$prenom $nom'.trim();
+          }
+        }
+        
+        // Fallback to other collections if name not found
+        if (providerName == 'Provider' && providerData != null) {
+          providerName = providerData['name'] ?? providerData['fullName'] ?? 'Provider';
+        }
+        
+        // Get specialty
+        String specialty = 'Healthcare Provider';
+        if (providerData != null) {
+          specialty = providerData['specialite'] ?? providerData['specialty'] ?? 'Healthcare Provider';
+        }
+        
+        // Get profile image from users collection first, then fallback
+        String? avatar = userData?['photo_profile'];
+        if (avatar == null || avatar.isEmpty) {
+          avatar = providerData?['profileImage'] ?? providerData?['avatar'] ?? providerData?['photo_url'];
+        }
+        
+        // Get profession for passing to chat screen
+        final profession = providerData?['profession'] ?? '';
 
         // Get unread message count
         final messagesQuery = await _firestore
@@ -167,17 +223,18 @@ class _ChatScreenState extends State<ChatScreen>
 
         loadedChats.add({
           'id': otherUserId,
-          'name': providerData['name'] ?? providerData['fullName'] ?? 'Provider',
-          'specialty': providerData['specialty'] ?? providerData['role'] ?? 'Healthcare Provider',
+          'name': providerName,
+          'specialty': specialty,
           'lastMessage': chatData['lastMessage'] ?? 'No messages yet',
           'time': timeString,
           'unreadCount': unreadCount,
-          'isOnline': providerData['isOnline'] ?? false,
-          'avatar': providerData['profileImage'] ?? providerData['avatar'] ?? 'assets/images/doctor1.png',
+          'isOnline': providerData?['disponible'] ?? providerData?['isOnline'] ?? false,
+          'avatar': avatar ?? '',
+          'profession': profession,
           'isAI': false,
           'timestamp': lastTimestamp ?? DateTime.now(),
-          'rating': providerData['rating']?.toString() ?? '4.5',
-          'experience': providerData['experience']?.toString() ?? '5+',
+          'rating': providerData?['rating']?.toString() ?? '0.0',
+          'experience': providerData?['experience']?.toString() ?? '5+',
         });
       }
 
@@ -353,82 +410,159 @@ class _ChatScreenState extends State<ChatScreen>
                         itemCount: snapshot.data!.docs.length,
                         itemBuilder: (context, index) {
                           final doc = snapshot.data!.docs[index];
-                          final data = doc.data() as Map<String, dynamic>;
+                          final professionalData = doc.data() as Map<String, dynamic>;
+                          final providerId = doc.id;
                           
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            elevation: 2,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.all(12),
-                              leading: CircleAvatar(
-                                radius: 28,
-                                backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
-                                child: Icon(
-                                  Icons.person,
-                                  color: AppTheme.primaryColor,
-                                  size: 28,
+                          return FutureBuilder<DocumentSnapshot>(
+                            future: _firestore.collection('users').doc(providerId).get(),
+                            builder: (context, userSnapshot) {
+                              if (!userSnapshot.hasData) {
+                                return const SizedBox.shrink();
+                              }
+                              
+                              final userData = userSnapshot.data!.data() as Map<String, dynamic>?;
+                              
+                              // Get name from users collection
+                              final prenom = userData?['prenom'] ?? '';
+                              final nom = userData?['nom'] ?? '';
+                              
+                              // Get profession and apply correct prefix
+                              final profession = professionalData['profession'] ?? '';
+                              final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+                              final titlePrefix = isNurse ? '' : 'Dr. ';
+                              final fullName = '$titlePrefix$prenom $nom'.trim();
+                              
+                              // Get profession display
+                              String professionDisplay = 'Healthcare Provider';
+                              if (profession.contains('nurse') || profession.contains('infirmier')) {
+                                professionDisplay = 'Nurse';
+                              } else if (profession.contains('medecin') || profession.contains('doctor') || profession.contains('docteur')) {
+                                professionDisplay = 'Doctor';
+                              }
+                              
+                              // Get specialty
+                              final specialty = professionalData['specialite'] ?? 'Healthcare Provider';
+                              
+                              // Get profile image
+                              final photoProfile = userData?['photo_profile'];
+                              final photoUrl = professionalData['photo_url'];
+                              final hasImage = (photoProfile != null && photoProfile.isNotEmpty) || 
+                                              (photoUrl != null && photoUrl.isNotEmpty);
+                              
+                              // Get rating
+                              final rating = professionalData['rating']?.toString() ?? '0.0';
+                              
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                elevation: 2,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
-                              ),
-                              title: Text(
-                                data['name'] ?? data['fullName'] ?? 'Provider',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    data['specialty'] ?? 'Healthcare Provider',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondaryColor,
-                                      fontSize: 14,
+                                child: ListTile(
+                                  contentPadding: const EdgeInsets.all(12),
+                                  leading: CircleAvatar(
+                                    radius: 28,
+                                    backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                                    backgroundImage: hasImage
+                                        ? NetworkImage(photoProfile ?? photoUrl ?? '')
+                                        : null,
+                                    child: !hasImage
+                                        ? Icon(
+                                            isNurse ? Icons.health_and_safety_rounded : Icons.local_hospital_rounded,
+                                            color: AppTheme.primaryColor,
+                                            size: 28,
+                                          )
+                                        : null,
+                                  ),
+                                  title: Text(
+                                    fullName.isNotEmpty ? fullName : 'Provider',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
                                     ),
                                   ),
-                                  if (data['rating'] != null) ...[
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.star,
-                                          size: 16,
-                                          color: Colors.amber,
+                                  subtitle: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const SizedBox(height: 4),
+                                      // Profession badge
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primaryColor.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
                                         ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          data['rating'].toString(),
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w500,
-                                          ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              isNurse ? Icons.health_and_safety_rounded : Icons.local_hospital_rounded,
+                                              size: 12,
+                                              color: AppTheme.primaryColor,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              professionDisplay,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: AppTheme.primaryColor,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      // Specialty
+                                      Text(
+                                        specialty,
+                                        style: TextStyle(
+                                          color: AppTheme.textSecondaryColor,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      if (rating != '0.0') ...[
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.star,
+                                              size: 16,
+                                              color: Colors.amber,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              rating,
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              trailing: Icon(
-                                Icons.chat_bubble_outline,
-                                color: AppTheme.primaryColor,
-                              ),
-                              onTap: () {
-                                Navigator.pop(context);
-                                _openChat({
-                                  'id': doc.id,
-                                  'name': data['name'] ?? data['fullName'] ?? 'Provider',
-                                  'specialty': data['specialty'] ?? 'Healthcare Provider',
-                                  'isOnline': data['isOnline'] ?? false,
-                                  'rating': data['rating']?.toString() ?? '4.5',
-                                  'experience': data['experience']?.toString() ?? '5+',
-                                  'isAI': false,
-                                });
-                              },
-                            ),
+                                    ],
+                                  ),
+                                  trailing: Icon(
+                                    Icons.chat_bubble_outline,
+                                    color: AppTheme.primaryColor,
+                                  ),
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    _openChat({
+                                      'id': providerId,
+                                      'name': fullName.isNotEmpty ? fullName : 'Provider',
+                                      'specialty': specialty,
+                                      'isOnline': professionalData['disponible'] ?? false,
+                                      'rating': rating,
+                                      'avatar': photoProfile ?? photoUrl ?? '',
+                                      'profession': profession,
+                                      'isAI': false,
+                                    });
+                                  },
+                                ),
+                              );
+                            },
                           );
                         },
                       );
@@ -647,49 +781,50 @@ class _ChatScreenState extends State<ChatScreen>
                 // Avatar with online indicator
                 Stack(
                   children: [
-                    Container(
-                      width: 60,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        color: chat['isAI'] == true 
-                            ? AppTheme.primaryColor.withOpacity(0.1) 
-                            : AppTheme.primaryColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(30),
-                        border: Border.all(
-                          color: chat['isAI'] == true 
-                              ? AppTheme.primaryColor
-                              : AppTheme.primaryColor.withOpacity(0.2),
-                          width: 2,
-                        ),
-                        gradient: chat['isAI'] == true ? LinearGradient(
-                          colors: [AppTheme.primaryColor, AppTheme.secondaryColor],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ) : null,
-                      ),
-                      child: chat['isAI'] == true 
-                          ? Icon(
-                              Icons.auto_awesome_rounded,
-                              color: Colors.white,
-                              size: 28,
-                            )
-                          : ClipRRect(
-                              borderRadius: BorderRadius.circular(22),
-                              child: Image.asset(
-                                'assets/images/avatar.png',
-                                fit: BoxFit.cover,
-                                width: 44,
-                                height: 44,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Icon(
-                                    Icons.person_rounded,
-                                    color: AppTheme.primaryColor,
-                                    size: 28,
-                                  );
-                                },
-                              ),
+                    () {
+                      if (chat['isAI'] == true) {
+                        return Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(
+                              color: AppTheme.primaryColor,
+                              width: 2,
                             ),
-                    ),
+                            gradient: LinearGradient(
+                              colors: [AppTheme.primaryColor, AppTheme.secondaryColor],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.auto_awesome_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                        );
+                      }
+                      
+                      // For providers - show real image or fallback
+                      final avatar = chat['avatar'];
+                      final hasAvatar = avatar != null && avatar.toString().isNotEmpty;
+                      final profession = chat['profession'] ?? '';
+                      final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+                      
+                      return CircleAvatar(
+                        radius: 30,
+                        backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                        backgroundImage: hasAvatar ? NetworkImage(avatar.toString()) : null,
+                        child: !hasAvatar
+                            ? Icon(
+                                isNurse ? Icons.health_and_safety_rounded : Icons.local_hospital_rounded,
+                                color: AppTheme.primaryColor,
+                                size: 28,
+                              )
+                            : null,
+                      );
+                    }(),
                     if (chat['isOnline'])
                       Positioned(
                         bottom: 2,
@@ -742,14 +877,75 @@ class _ChatScreenState extends State<ChatScreen>
                       
                       const SizedBox(height: 4),
                       
-                      Text(
-                        chat['specialty'],
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: AppTheme.primaryColor,
+                      // Show profession badge if not AI
+                      if (chat['isAI'] != true && chat['profession'] != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      () {
+                                        final profession = chat['profession'] ?? '';
+                                        final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+                                        return isNurse ? Icons.health_and_safety_rounded : Icons.local_hospital_rounded;
+                                      }(),
+                                      size: 12,
+                                      color: AppTheme.primaryColor,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      () {
+                                        final profession = chat['profession'] ?? '';
+                                        if (profession.contains('nurse') || profession.contains('infirmier')) {
+                                          return 'Nurse';
+                                        } else if (profession.contains('medecin') || profession.contains('doctor') || profession.contains('docteur')) {
+                                          return 'Doctor';
+                                        }
+                                        return 'Provider';
+                                      }(),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppTheme.primaryColor,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  chat['specialty'],
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppTheme.textSecondaryColor,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Text(
+                          chat['specialty'],
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.primaryColor,
+                          ),
                         ),
-                      ),
                       
                       const SizedBox(height: 8),
                       

@@ -273,7 +273,8 @@ class _PatientChatScreenState extends State<PatientChatScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Dr. ${widget.doctorInfo['name'] ?? 'Doctor'}',
+                  widget.doctorInfo['name'] ?? 'Provider',
+                  // Name already includes prefix from chat_screen
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -344,28 +345,24 @@ class _PatientChatScreenState extends State<PatientChatScreen>
 
   Widget _buildDoctorAvatar() {
     final isOnline = widget.doctorInfo['isOnline'] ?? true;
+    final avatar = widget.doctorInfo['avatar'];
+    final hasAvatar = avatar != null && avatar.toString().isNotEmpty;
+    final profession = widget.doctorInfo['profession'] ?? '';
+    final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+    
     return Stack(
       children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppTheme.primaryColor,
-                AppTheme.primaryColor.withOpacity(0.7),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white, width: 2),
-          ),
-          child: Icon(
-            widget.doctorInfo['avatar'] != null ? Icons.person : Icons.local_hospital,
-            color: Colors.white,
-            size: 20,
-          ),
+        CircleAvatar(
+          radius: 20,
+          backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+          backgroundImage: hasAvatar ? NetworkImage(avatar.toString()) : null,
+          child: !hasAvatar
+              ? Icon(
+                  isNurse ? Icons.health_and_safety_rounded : Icons.local_hospital_rounded,
+                  color: AppTheme.primaryColor,
+                  size: 20,
+                )
+              : null,
         ),
         if (isOnline)
           Positioned(
@@ -409,17 +406,62 @@ class _PatientChatScreenState extends State<PatientChatScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Dr. ${widget.doctorInfo['name'] ?? 'Doctor'}',
+                  () {
+                    final name = widget.doctorInfo['name'] ?? 'Provider';
+                    // Name already includes prefix from chat_screen
+                    return name;
+                  }(),
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.textPrimaryColor,
                   ),
                 ),
+                const SizedBox(height: 4),
+                // Profession badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        () {
+                          final profession = widget.doctorInfo['profession'] ?? '';
+                          final isNurse = profession.contains('nurse') || profession.contains('infirmier');
+                          return isNurse ? Icons.health_and_safety_rounded : Icons.local_hospital_rounded;
+                        }(),
+                        size: 12,
+                        color: AppTheme.primaryColor,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        () {
+                          final profession = widget.doctorInfo['profession'] ?? '';
+                          if (profession.contains('nurse') || profession.contains('infirmier')) {
+                            return 'Nurse';
+                          } else if (profession.contains('medecin') || profession.contains('doctor') || profession.contains('docteur')) {
+                            return 'Doctor';
+                          }
+                          return 'Provider';
+                        }(),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.primaryColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
                 Text(
                   widget.doctorInfo['specialty'] ?? 'General Physician',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     color: Colors.grey.shade600,
                   ),
                 ),
@@ -429,7 +471,7 @@ class _PatientChatScreenState extends State<PatientChatScreen>
                     Icon(Icons.star, color: Colors.amber, size: 16),
                     const SizedBox(width: 4),
                     Text(
-                      '${widget.doctorInfo['rating'] ?? '4.8'} • ${widget.doctorInfo['experience'] ?? '10+'} years exp',
+                      '${widget.doctorInfo['rating'] ?? '0.0'}',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey.shade600,

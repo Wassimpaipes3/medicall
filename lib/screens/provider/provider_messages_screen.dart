@@ -109,40 +109,82 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
           continue;
         }
 
-        // Try to get patient info from patients collection
+        // Get patient info from users collection first (for name and photo)
+        DocumentSnapshot? userDoc;
+        Map<String, dynamic>? userData;
+        try {
+          print('   🔍 Looking for patient in users collection...');
+          userDoc = await _firestore
+              .collection('users')
+              .doc(patientId)
+              .get();
+          
+          if (userDoc.exists) {
+            userData = userDoc.data() as Map<String, dynamic>?;
+            print('   ✅ User found in users collection');
+          }
+        } catch (e) {
+          print('   ⚠️ Error getting user data: $e');
+        }
+
+        // Get additional patient info from patients collection
         DocumentSnapshot? patientDoc;
+        Map<String, dynamic>? patientData;
         try {
           print('   🔍 Looking for patient in patients collection...');
           patientDoc = await _firestore
               .collection('patients')
               .doc(patientId)
               .get();
+          
+          if (patientDoc.exists) {
+            patientData = patientDoc.data() as Map<String, dynamic>?;
+            print('   ✅ Patient found in patients collection');
+          }
         } catch (e) {
-          // If not found, try professionals collection (for testing)
+          print('   ⚠️ Patient not in patients collection (might be a provider)');
+        }
+
+        // If not a patient, might be another provider (for testing)
+        if (patientData == null) {
           try {
             print('   🔍 Looking for patient in professionals collection...');
             patientDoc = await _firestore
                 .collection('professionals')
                 .doc(patientId)
                 .get();
+            
+            if (patientDoc.exists) {
+              patientData = patientDoc.data() as Map<String, dynamic>?;
+              print('   ✅ Found in professionals collection');
+            }
           } catch (e) {
-            print('   ❌ Error getting patient data: $e');
-            continue;
+            print('   ❌ Error getting professional data: $e');
           }
         }
 
-        if (!patientDoc.exists) {
-          print('   ⚠️ Patient document does not exist');
-          continue;
+        // Build patient name from users collection
+        String patientName = 'Patient';
+        if (userData != null) {
+          final prenom = userData['prenom'] ?? '';
+          final nom = userData['nom'] ?? '';
+          if (prenom.isNotEmpty || nom.isNotEmpty) {
+            patientName = '$prenom $nom'.trim();
+          }
+        }
+        
+        // Fallback to other collections if name not found
+        if (patientName == 'Patient' && patientData != null) {
+          patientName = patientData['name'] ?? patientData['fullName'] ?? 'Patient';
         }
 
-        final patientData = patientDoc.data() as Map<String, dynamic>?;
-        if (patientData == null) {
-          print('   ⚠️ Patient data is null');
-          continue;
+        print('   ✅ Patient name: $patientName');
+        
+        // Get profile image from users collection first, then fallback
+        String? patientAvatar = userData?['photo_profile'];
+        if (patientAvatar == null || patientAvatar.isEmpty) {
+          patientAvatar = patientData?['profileImage'] ?? patientData?['avatar'] ?? patientData?['photo_url'];
         }
-
-        print('   ✅ Patient found: ${patientData['name'] ?? patientData['fullName']}');
 
         // Get unread message count
         print('   📬 Counting unread messages...');
@@ -183,13 +225,13 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
           'id': patientId,
           'userId': patientId,  // For ComprehensiveProviderChatScreen
           'patientId': patientId,  // For ComprehensiveProviderChatScreen
-          'patientName': patientData['name'] ?? patientData['fullName'] ?? 'Patient',
-          'patientAvatar': patientData['profileImage'] ?? patientData['avatar'],
+          'patientName': patientName,
+          'patientAvatar': patientAvatar,
           'lastMessage': chatData['lastMessage'] ?? 'No messages yet',
           'lastMessageTime': timeString,
           'unreadCount': unreadCount,
-          'isOnline': patientData['isOnline'] ?? false,
-          'serviceType': patientData['lastServiceType'] ?? 'General Care',
+          'isOnline': patientData?['isOnline'] ?? false,
+          'serviceType': patientData?['lastServiceType'] ?? 'General Care',
           'status': 'active',
           'timestamp': lastTimestamp ?? DateTime.now(),
         };
@@ -516,31 +558,48 @@ class _ProviderMessagesScreenState extends State<ProviderMessagesScreen>
               // Avatar
               Stack(
                 children: [
-                  Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppTheme.primaryColor,
-                          const Color(0xFF10B981),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(25),
-                    ),
-                    child: Center(
-                      child: Text(
-                        conversation['patientName'].toString().substring(0, 1).toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+                  () {
+                    final avatar = conversation['patientAvatar'];
+                    final hasAvatar = avatar != null && avatar.toString().isNotEmpty;
+                    
+                    if (hasAvatar) {
+                      return CircleAvatar(
+                        radius: 25,
+                        backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+                        backgroundImage: NetworkImage(avatar.toString()),
+                        onBackgroundImageError: (_, __) {
+                          // Fallback handled by child
+                        },
+                        child: null,
+                      );
+                    } else {
+                      return Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              AppTheme.primaryColor,
+                              const Color(0xFF10B981),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(25),
                         ),
-                      ),
-                    ),
-                  ),
+                        child: Center(
+                          child: Text(
+                            conversation['patientName'].toString().substring(0, 1).toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                  }(),
                   if (conversation['isOnline'])
                     Positioned(
                       bottom: 0,
