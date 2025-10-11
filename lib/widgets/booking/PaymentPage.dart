@@ -18,18 +18,12 @@ class PaymentPage extends StatefulWidget {
   final ServiceType selectedService;
   final Specialty selectedSpecialty;
   final LocationData selectedLocation;
-  final double basePrice;
-  final double travelFee;
-  final double serviceFee;
 
   const PaymentPage({
     super.key,
     required this.selectedService,
     required this.selectedSpecialty,
     required this.selectedLocation,
-    required this.basePrice,
-    required this.travelFee,
-    required this.serviceFee,
   });
 
   @override
@@ -38,7 +32,7 @@ class PaymentPage extends StatefulWidget {
 
 class _PaymentPageState extends State<PaymentPage>
     with TickerProviderStateMixin {
-  PaymentMethod? _selectedPaymentMethod;
+  PaymentMethod? _selectedPaymentMethod = PaymentMethod.cash; // Default to cash
   bool _isProcessing = false;
   
   late AnimationController _fadeController;
@@ -109,13 +103,28 @@ class _PaymentPageState extends State<PaymentPage>
                         _buildBookingSummary(),
                         const SizedBox(height: 24),
                         _buildPaymentMethods(),
-                        const SizedBox(height: 32),
-                        _buildPaymentButton(),
+                        const SizedBox(height: 100), // Extra space for fixed button
                       ],
                     ),
                   ),
                 ),
               ),
+            ),
+            
+            // Fixed Payment Button at Bottom
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 20,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: _buildPaymentButton(),
             ),
           ],
         ),
@@ -174,8 +183,6 @@ class _PaymentPageState extends State<PaymentPage>
   }
 
   Widget _buildBookingSummary() {
-    final totalPrice = widget.basePrice + widget.travelFee + widget.serviceFee;
-    
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -221,17 +228,7 @@ class _PaymentPageState extends State<PaymentPage>
           const SizedBox(height: 12),
           _buildSummaryRow('Location', widget.selectedLocation.name),
           const SizedBox(height: 12),
-          _buildSummaryRow('Base Fee', '\$${widget.basePrice.toStringAsFixed(2)}'),
-          const SizedBox(height: 12),
-          _buildSummaryRow('Travel Fee', '\$${widget.travelFee.toStringAsFixed(2)}'),
-          const SizedBox(height: 12),
-          _buildSummaryRow('Service Fee', '\$${widget.serviceFee.toStringAsFixed(2)}'),
-          const Divider(height: 24),
-          _buildSummaryRow(
-            'Total Amount',
-            '\$${totalPrice.toStringAsFixed(2)}',
-            isTotal: true,
-          ),
+          _buildSummaryRow('Address', widget.selectedLocation.address),
         ],
       ),
     );
@@ -275,7 +272,7 @@ class _PaymentPageState extends State<PaymentPage>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Payment Methods',
+          'Payment Method',
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.bold,
             color: const Color(0xFF1E293B),
@@ -288,30 +285,6 @@ class _PaymentPageState extends State<PaymentPage>
           'Pay with cash upon service completion',
           Icons.money,
           const Color(0xFF10B981),
-        ),
-        const SizedBox(height: 12),
-        _buildPaymentMethodCard(
-          PaymentMethod.creditCard,
-          'Credit/Debit Card',
-          'Secure payment with your card',
-          Icons.credit_card,
-          const Color(0xFF3B82F6),
-        ),
-        const SizedBox(height: 12),
-        _buildPaymentMethodCard(
-          PaymentMethod.mobilePayment,
-          'Mobile Payment',
-          'Pay with mobile wallet or app',
-          Icons.phone_android,
-          const Color(0xFF8B5CF6),
-        ),
-        const SizedBox(height: 12),
-        _buildPaymentMethodCard(
-          PaymentMethod.bankTransfer,
-          'Bank Transfer',
-          'Direct transfer to our account',
-          Icons.account_balance,
-          const Color(0xFFF59E0B),
         ),
       ],
     );
@@ -755,9 +728,6 @@ class _PaymentPageState extends State<PaymentPage>
     try {
       // Simulate payment processing
       await Future.delayed(const Duration(seconds: 2));
-
-      // Calculate total price
-      final totalPrice = widget.basePrice + widget.travelFee + widget.serviceFee;
       
       // Prepare appointment data for Firestore
       final service = _getServiceName(widget.selectedSpecialty);
@@ -778,11 +748,7 @@ class _PaymentPageState extends State<PaymentPage>
         'specialty': widget.selectedSpecialty.toString(),
         'locationName': widget.selectedLocation.name,
         'locationAddress': widget.selectedLocation.address,
-        'totalPrice': totalPrice,
         'paymentMethod': _getPaymentMethodText(),
-        'basePrice': widget.basePrice,
-        'travelFee': widget.travelFee,
-        'serviceFee': widget.serviceFee,
         'status': 'searching_provider',
         'createdAt': DateTime.now().toIso8601String(),
       };
@@ -805,7 +771,7 @@ class _PaymentPageState extends State<PaymentPage>
           builder: (_) => PolishedSelectProviderScreen(
             service: service,
             specialty: _getServiceName(widget.selectedSpecialty),
-            prix: totalPrice,
+            prix: 0.0, // Price will be determined later
             paymentMethod: _getPaymentMethodText(),
             patientLocation: patientLocation,
           ),

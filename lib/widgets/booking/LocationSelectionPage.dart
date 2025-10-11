@@ -1,4 +1,4 @@
-import 'ServiceSummaryPage.dart';
+import 'PaymentPage.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -1607,7 +1607,7 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
                             : null,
                       ),
                       child: Icon(
-                        canProceed ? Icons.summarize_outlined : Icons.location_off_outlined,
+                        canProceed ? Icons.payment_outlined : Icons.location_off_outlined,
                         color: canProceed ? Colors.white : Colors.grey.shade500,
                         size: 22,
                       ),
@@ -1618,7 +1618,7 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
                     // Button Text
                     Expanded(
                       child: Text(
-                        canProceed ? 'Continue to Summary' : 'Select Location First',
+                        canProceed ? 'Continue to Payment' : 'Select Location First',
                         textAlign: TextAlign.center,
                         style: EnhancedAppTheme.bodyLarge.copyWith(
                           fontWeight: FontWeight.w700,
@@ -1755,14 +1755,14 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
 
   void _navigateToServiceSummary() {
     if (_selectedLocation != null) {
+      // Navigate directly to Payment Page (skipping summary)
       Navigator.of(context).push(
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) =>
-              ServiceSummaryPage(
+              PaymentPage(
                 selectedService: widget.selectedService,
                 selectedSpecialty: widget.selectedSpecialty,
                 selectedLocation: _selectedLocation!,
-                preSelectedDoctor: widget.preSelectedDoctor,
               ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             const begin = Offset(1.0, 0.0);
