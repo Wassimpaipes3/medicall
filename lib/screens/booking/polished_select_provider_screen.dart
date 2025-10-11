@@ -112,17 +112,44 @@ class _PolishedSelectProviderScreenState extends State<PolishedSelectProviderScr
     final requestedService = (widget.service).toLowerCase().trim();
     final requestedSpecialty = widget.specialty?.toLowerCase().trim();
     
-    print('   Searching for: service="$requestedService", specialite="$requestedSpecialty"');
+    // Determine profession based on service type
+    String? requiredProfession;
+    String? requiredSpecialty;
+    
+    if (requestedService.contains('doctor') || 
+        requestedService.contains('docteur') || 
+        requestedService.contains('medecin') ||
+        requestedService.contains('médecin')) {
+      requiredProfession = 'medecin';
+      requiredSpecialty = 'generaliste';  // ONLY generaliste for doctors
+      print('   🩺 Filtering for DOCTORS with GENERALISTE specialty only');
+    } else if (requestedService.contains('nurse') || 
+               requestedService.contains('infirmier') || 
+               requestedService.contains('infirmière')) {
+      requiredProfession = 'infirmier';
+      // For nurses, use specialty from widget OR show all nurse specialties
+      requiredSpecialty = requestedSpecialty;
+      print('   💉 Filtering for NURSES - showing all nurse specialties from backend');
+    }
+    
+    print('   Searching for: service="$requestedService", profession="$requiredProfession", specialite="$requiredSpecialty"');
     
     Query query = col.where('disponible', whereIn: [true, 'true', 1, '1']);
     
     try {
-      query = query.where('service', isEqualTo: requestedService);
-      if (requestedSpecialty != null && requestedSpecialty.isNotEmpty) {
-        query = query.where('specialite', isEqualTo: requestedSpecialty);
+      // Filter by profession (doctor or nurse)
+      if (requiredProfession != null) {
+        query = query.where('profession', isEqualTo: requiredProfession);
+        print('   ✅ Added profession filter: $requiredProfession');
+      }
+      
+      // Filter by specialty
+      if (requiredSpecialty != null && requiredSpecialty.isNotEmpty) {
+        query = query.where('specialite', isEqualTo: requiredSpecialty);
+        print('   ✅ Added specialty filter: $requiredSpecialty');
       }
     } catch (e) {
-      print('⚠️ Service filter failed: $e');
+      print('⚠️ Filter failed: $e');
     }
 
     _providersSubscription?.cancel();
@@ -145,17 +172,43 @@ class _PolishedSelectProviderScreenState extends State<PolishedSelectProviderScr
   }
 
   void _tryFallbackStrategies() {
-    print('🔄 [Fallback Strategy 1] Trying service-only filter...');
+    print('🔄 [Fallback Strategy 1] Trying profession-only filter...');
     final col = FirebaseFirestore.instance.collection('professionals');
-    col
-        .where('disponible', whereIn: [true, 'true', 1, '1'])
-        .where('service', isEqualTo: widget.service.toLowerCase().trim())
-        .limit(25)
-        .get()
-        .then((snapshot) {
+    final requestedService = (widget.service).toLowerCase().trim();
+    
+    // Determine profession and specialty based on service type
+    String? requiredProfession;
+    String? requiredSpecialty;
+    
+    if (requestedService.contains('doctor') || 
+        requestedService.contains('docteur') || 
+        requestedService.contains('medecin') ||
+        requestedService.contains('médecin')) {
+      requiredProfession = 'medecin';
+      requiredSpecialty = 'generaliste';  // ONLY generaliste for doctors
+      print('   Filtering by profession: medecin, specialty: generaliste');
+    } else if (requestedService.contains('nurse') || 
+               requestedService.contains('infirmier') || 
+               requestedService.contains('infirmière')) {
+      requiredProfession = 'infirmier';
+      // For nurses, show all specialties from backend
+      print('   Filtering by profession: infirmier (all specialties)');
+    }
+    
+    Query query = col.where('disponible', whereIn: [true, 'true', 1, '1']);
+    if (requiredProfession != null) {
+      query = query.where('profession', isEqualTo: requiredProfession);
+      
+      // For doctors, also filter by generaliste
+      if (requiredSpecialty != null) {
+        query = query.where('specialite', isEqualTo: requiredSpecialty);
+      }
+    }
+    
+    query.limit(25).get().then((snapshot) {
       print('   Fallback 1 returned ${snapshot.docs.length} providers');
       if (snapshot.docs.isNotEmpty) {
-        _updateProviderList(snapshot.docs);
+        _updateProviderList(snapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>());
       } else {
         print('   Still no results, trying fallback 2...');
         _loadAllAvailableProviders();
@@ -167,18 +220,44 @@ class _PolishedSelectProviderScreenState extends State<PolishedSelectProviderScr
   }
 
   void _loadAllAvailableProviders() {
-    print('🔄 [Fallback Strategy 2] Loading ALL available providers...');
+    print('🔄 [Fallback Strategy 2] Loading ALL available providers by profession...');
     final col = FirebaseFirestore.instance.collection('professionals');
-    col
-        .where('disponible', whereIn: [true, 'true', 1, '1'])
-        .limit(25)
-        .get()
-        .then((snapshot) {
+    final requestedService = (widget.service).toLowerCase().trim();
+    
+    // Filter by profession and specialty even in final fallback
+    String? requiredProfession;
+    String? requiredSpecialty;
+    
+    if (requestedService.contains('doctor') || 
+        requestedService.contains('docteur') || 
+        requestedService.contains('medecin') ||
+        requestedService.contains('médecin')) {
+      requiredProfession = 'medecin';
+      requiredSpecialty = 'generaliste';  // ONLY generaliste for doctors
+      print('   Final fallback filtering by profession: medecin, specialty: generaliste');
+    } else if (requestedService.contains('nurse') || 
+               requestedService.contains('infirmier') || 
+               requestedService.contains('infirmière')) {
+      requiredProfession = 'infirmier';
+      print('   Final fallback filtering by profession: infirmier (all specialties)');
+    }
+    
+    Query query = col.where('disponible', whereIn: [true, 'true', 1, '1']);
+    if (requiredProfession != null) {
+      query = query.where('profession', isEqualTo: requiredProfession);
+      
+      // For doctors, also filter by generaliste
+      if (requiredSpecialty != null) {
+        query = query.where('specialite', isEqualTo: requiredSpecialty);
+      }
+    }
+    
+    query.limit(25).get().then((snapshot) {
       print('   Fallback 2 returned ${snapshot.docs.length} providers');
       if (snapshot.docs.isEmpty) {
-        print('❌ No available providers found in database!');
+        print('❌ No available providers found in database for profession: $requiredProfession!');
       }
-      _updateProviderList(snapshot.docs);
+      _updateProviderList(snapshot.docs.cast<QueryDocumentSnapshot<Map<String, dynamic>>>());
     }).catchError((e) {
       print('❌ Fallback 2 failed: $e');
       setState(() => _loading = false);

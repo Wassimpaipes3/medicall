@@ -1,5 +1,7 @@
 import 'ServiceSummaryPage.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'ServiceSelectionPage.dart';
 import '../../core/enhanced_theme.dart';
 import '../../data/services/location_service.dart';
@@ -58,33 +60,9 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
-  // Pre-saved locations
-  final List<LocationData> _preSavedLocations = [
-    LocationData(
-      name: 'Home',
-      address: '123 Main Street, City, State',
-      latitude: 40.7128,
-      longitude: -74.0060,
-    ),
-    LocationData(
-      name: 'Office',
-      address: '456 Business Ave, Downtown, State',
-      latitude: 40.7589,
-      longitude: -73.9851,
-    ),
-    LocationData(
-      name: 'Hospital',
-      address: '789 Medical Center Dr, Healthcare District',
-      latitude: 40.7505,
-      longitude: -73.9934,
-    ),
-    LocationData(
-      name: 'Clinic',
-      address: '321 Health Plaza, Medical Complex',
-      latitude: 40.7614,
-      longitude: -73.9776,
-    ),
-  ];
+  // Dynamic saved locations from Firebase
+  List<LocationData> _savedLocations = [];
+  bool _isLoadingLocations = false;
 
   @override
   void initState() {
@@ -116,6 +94,9 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
 
     _fadeController.forward();
     _slideController.forward();
+    
+    // Load saved locations from Firebase
+    _loadSavedLocationsFromFirebase();
   }
 
   @override
@@ -125,6 +106,171 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
     _customNameController.dispose();
     _customAddressController.dispose();
     super.dispose();
+  }
+
+  /// Load saved locations from Firebase for current patient
+  Future<void> _loadSavedLocationsFromFirebase() async {
+    setState(() {
+      _isLoadingLocations = true;
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        print('❌ No user logged in, cannot load saved locations');
+        setState(() {
+          _isLoadingLocations = false;
+        });
+        return;
+      }
+
+      print('🔍 Loading saved locations for patient: ${user.uid}');
+      
+      final locationsSnapshot = await FirebaseFirestore.instance
+          .collection('patients')
+          .doc(user.uid)
+          .collection('savedLocations')
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      print('   Found ${locationsSnapshot.docs.length} saved locations');
+
+      final List<LocationData> locations = [];
+      for (var doc in locationsSnapshot.docs) {
+        final data = doc.data();
+        final GeoPoint? geoPoint = data['location'] as GeoPoint?;
+        
+        locations.add(LocationData(
+          name: data['name'] ?? 'Unknown',
+          address: data['address'] ?? '',
+          latitude: geoPoint?.latitude ?? 0.0,
+          longitude: geoPoint?.longitude ?? 0.0,
+          isCustom: data['isCustom'] ?? false,
+        ));
+        print('   📍 ${data['name']}: ${data['address']} (${geoPoint?.latitude}, ${geoPoint?.longitude})');
+      }
+
+      setState(() {
+        _savedLocations = locations;
+        _isLoadingLocations = false;
+      });
+
+      print('✅ Loaded ${_savedLocations.length} saved locations successfully');
+    } catch (e) {
+      print('❌ Error loading saved locations: $e');
+      setState(() {
+        _isLoadingLocations = false;
+      });
+    }
+  }
+
+  /// Save location to Firebase for current patient
+  Future<void> _saveLocationToFirebase(LocationData location) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        print('❌ No user logged in, cannot save location');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.error, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(child: Text('You must be logged in to save locations')),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+        return;
+      }
+
+      print('💾 Saving location to Firebase: ${location.name}');
+      print('   Patient ID: ${user.uid}');
+      print('   Collection: patients/${user.uid}/savedLocations');
+
+      await FirebaseFirestore.instance
+          .collection('patients')
+          .doc(user.uid)
+          .collection('savedLocations')
+          .add({
+        'name': location.name,
+        'address': location.address,
+        'location': GeoPoint(location.latitude, location.longitude),
+        'isCustom': location.isCustom,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      print('✅ Location saved successfully with GeoPoint(${location.latitude}, ${location.longitude})');
+
+      // Reload locations
+      await _loadSavedLocationsFromFirebase();
+
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Location "${location.name}" saved successfully')),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error saving location: $e');
+      
+      // Parse the error for better user feedback
+      String errorMessage = 'Failed to save location';
+      if (e.toString().contains('permission-denied')) {
+        errorMessage = 'Permission denied. Please check Firestore security rules.';
+        print('🔒 FIRESTORE PERMISSION ERROR:');
+        print('   You need to update your Firestore security rules to allow:');
+        print('   patients/{patientId}/savedLocations - write access for authenticated users');
+        print('   ');
+        print('   Add this rule to your Firestore:');
+        print('   match /patients/{patientId}/savedLocations/{locationId} {');
+        print('     allow read, write: if request.auth != null && request.auth.uid == patientId;');
+        print('   }');
+      } else if (e.toString().contains('not-found')) {
+        errorMessage = 'Patient document not found';
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(child: Text(errorMessage)),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            action: SnackBarAction(
+              label: 'Details',
+              textColor: Colors.white,
+              onPressed: () {
+                print('Full error: $e');
+              },
+            ),
+          ),
+        );
+      }
+    }
   }
 
   /// Get current real-time location
@@ -436,6 +582,16 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
         
         // Current Location Button
         _buildCurrentLocationButton(),
+        
+        // Save Current Location Button (appears after getting location)
+        if (_currentLocation != null && _currentLocationAddress.isNotEmpty)
+          Column(
+            children: [
+              const SizedBox(height: 12),
+              _buildSaveCurrentLocationButton(),
+            ],
+          ),
+        
         const SizedBox(height: 16),
         
         // Divider
@@ -458,27 +614,71 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
         const SizedBox(height: 16),
         
         // Saved Locations
-        Text(
-          'Saved Locations',
-          style: TextStyle(
-            fontSize: 18,
-            color: Colors.grey[700],
-            fontWeight: FontWeight.w700,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Saved Locations',
+              style: TextStyle(
+                fontSize: 18,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (_isLoadingLocations)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
         ),
         const SizedBox(height: 12),
         
-        ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _preSavedLocations.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            final location = _preSavedLocations[index];
-            final isSelected = _selectedLocation == location;
-            return _buildEnhancedLocationCard(location, isSelected);
-          },
-        ),
+        if (_savedLocations.isEmpty && !_isLoadingLocations)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.location_off_outlined, size: 48, color: Colors.grey.shade400),
+                const SizedBox(height: 12),
+                Text(
+                  'No saved locations yet',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Use your current location or add a custom address below',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey.shade500,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (_savedLocations.isNotEmpty)
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _savedLocations.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 16),
+            itemBuilder: (context, index) {
+              final location = _savedLocations[index];
+              final isSelected = _selectedLocation == location;
+              return _buildEnhancedLocationCard(location, isSelected);
+            },
+          ),
       ],
     );
   }
@@ -624,6 +824,159 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSaveCurrentLocationButton() {
+    return GestureDetector(
+      onTap: () => _showSaveCurrentLocationDialog(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF10B981), Color(0xFF059669)],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF10B981).withOpacity(0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: const [
+            Icon(Icons.bookmark_add_outlined, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Text(
+              'Save This Location',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSaveCurrentLocationDialog() {
+    final TextEditingController nameController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: const [
+            Icon(Icons.bookmark_add, color: Color(0xFF6366F1)),
+            SizedBox(width: 12),
+            Text(
+              'Save Location',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Give this location a name:',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'e.g., Home, Office, Gym',
+                prefixIcon: const Icon(Icons.edit_location, color: Color(0xFF6366F1)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF6366F1), width: 2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on, size: 16, color: Color(0xFF6366F1)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _currentLocationAddress,
+                      style: const TextStyle(fontSize: 12),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.trim().isNotEmpty) {
+                Navigator.pop(context);
+                
+                final locationToSave = LocationData(
+                  name: nameController.text.trim(),
+                  address: _currentLocationAddress,
+                  latitude: _currentLocation!.latitude,
+                  longitude: _currentLocation!.longitude,
+                  isCustom: false,
+                );
+                
+                await _saveLocationToFirebase(locationToSave);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text(
+              'Save',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1335,17 +1688,41 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
       });
 
       try {
-        // Simulate geocoding delay
-        await Future.delayed(const Duration(milliseconds: 1500));
+        // Try to geocode the address to get real coordinates
+        double latitude = 0.0;
+        double longitude = 0.0;
         
-        // For demo purposes, use mock coordinates
+        try {
+          final locations = await locationFromAddress(_customAddressController.text);
+          if (locations.isNotEmpty) {
+            latitude = locations.first.latitude;
+            longitude = locations.first.longitude;
+            print('✅ Geocoded address: $latitude, $longitude');
+          }
+        } catch (e) {
+          // If geocoding fails, use current location or default
+          if (_currentLocation != null) {
+            latitude = _currentLocation!.latitude;
+            longitude = _currentLocation!.longitude;
+            print('⚠️ Geocoding failed, using current location');
+          } else {
+            // Use default coordinates (can be updated)
+            latitude = 36.7538 + (0.001 * DateTime.now().millisecond);
+            longitude = 3.0588 + (0.001 * DateTime.now().millisecond);
+            print('⚠️ Geocoding failed, using default coordinates');
+          }
+        }
+        
         final customLocation = LocationData(
           name: _customNameController.text,
           address: _customAddressController.text,
-          latitude: 40.7128 + (0.001 * DateTime.now().millisecond),
-          longitude: -74.0060 + (0.001 * DateTime.now().millisecond),
+          latitude: latitude,
+          longitude: longitude,
           isCustom: true,
         );
+
+        // Save to Firebase
+        await _saveLocationToFirebase(customLocation);
 
         setState(() {
           _selectedLocation = customLocation;
@@ -1356,19 +1733,8 @@ class _LocationSelectionPageState extends State<LocationSelectionPage>
         // Clear the form
         _customNameController.clear();
         _customAddressController.clear();
-
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Location saved successfully!'),
-            backgroundColor: const Color(0xFF10B981),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
       } catch (e) {
+        print('❌ Error in _saveCustomLocation: $e');
         setState(() {
           _isLoading = false;
         });

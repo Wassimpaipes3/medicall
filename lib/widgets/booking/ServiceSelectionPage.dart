@@ -1,5 +1,6 @@
 import 'LocationSelectionPage.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/enhanced_theme.dart';
 import '../../data/services/healthcare_service_provider.dart';
 
@@ -68,11 +69,17 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
     with TickerProviderStateMixin {
   ServiceType? _selectedService;
   Specialty? _selectedSpecialty;
+  String? _selectedSpecialtyString; // For dynamic Firebase specialties
   bool _showSpecialtySelection = false;
   late AnimationController _fadeController;
   late AnimationController _slideController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
+  
+  // Dynamic specialty lists from Firebase
+  List<String> _doctorSpecialties = [];
+  List<String> _nurseSpecialties = [];
+  bool _isLoadingSpecialties = false;
 
   @override
   void initState() {
@@ -104,6 +111,9 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
 
     _fadeController.forward();
     _slideController.forward();
+    
+    // Load specialties when screen opens
+    _loadSpecialtiesFromFirebase();
   }
 
   @override
@@ -111,6 +121,71 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
     _fadeController.dispose();
     _slideController.dispose();
     super.dispose();
+  }
+  
+  /// Fetch unique specialties from Firebase professionals collection
+  Future<void> _loadSpecialtiesFromFirebase() async {
+    setState(() {
+      _isLoadingSpecialties = true;
+    });
+    
+    try {
+      print('🔍 Loading specialties from Firebase...');
+      final professionalsRef = FirebaseFirestore.instance.collection('professionals');
+      
+      // Get all available professionals
+      final snapshot = await professionalsRef
+          .where('disponible', whereIn: [true, 'true', 1, '1'])
+          .get();
+      
+      print('   Found ${snapshot.docs.length} available professionals');
+      
+      // Separate doctors and nurses, collect unique specialties
+      final Set<String> doctorSpecialtySet = {};
+      final Set<String> nurseSpecialtySet = {};
+      
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final profession = (data['profession'] ?? '').toString().toLowerCase();
+        final specialite = (data['specialite'] ?? '').toString().trim();
+        
+        if (specialite.isEmpty) continue;
+        
+        if (profession.contains('medecin') || profession.contains('doctor')) {
+          doctorSpecialtySet.add(specialite);
+        } else if (profession.contains('infirmier') || profession.contains('nurse')) {
+          nurseSpecialtySet.add(specialite);
+        }
+      }
+      
+      print('   Doctor specialties found: $doctorSpecialtySet');
+      print('   Nurse specialties found: $nurseSpecialtySet');
+      
+      setState(() {
+        // For doctors, ONLY show "generaliste" if it exists, otherwise show what's available
+        _doctorSpecialties = doctorSpecialtySet.contains('generaliste') 
+            ? ['generaliste'] 
+            : doctorSpecialtySet.toList()..sort();
+            
+        // For nurses, show all available specialties from Firebase
+        _nurseSpecialties = nurseSpecialtySet.toList()..sort();
+        
+        _isLoadingSpecialties = false;
+      });
+      
+      print('✅ Specialties loaded successfully');
+      print('   Doctors will see: $_doctorSpecialties');
+      print('   Nurses will see: $_nurseSpecialties');
+      
+    } catch (e) {
+      print('❌ Error loading specialties from Firebase: $e');
+      setState(() {
+        // Fallback to default values
+        _doctorSpecialties = ['generaliste'];
+        _nurseSpecialties = ['wound care', 'blood drawing', 'soins infirmiers'];
+        _isLoadingSpecialties = false;
+      });
+    }
   }
 
   @override
@@ -634,6 +709,9 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
     final subtitle = isDoctor 
         ? 'Choose the medical specialty you need'
         : 'Select the type of nursing care required';
+    
+    // Get dynamic specialty list from Firebase
+    final specialtyList = isDoctor ? _doctorSpecialties : _nurseSpecialties;
         
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -653,28 +731,58 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
           ),
         ),
         const SizedBox(height: 24),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 0.9, // More consistent aspect ratio
+        
+        // Show loading indicator while fetching specialties
+        if (_isLoadingSpecialties)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (specialtyList.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Text(
+                isDoctor 
+                    ? 'No doctor specialties available at the moment'
+                    : 'No nursing services available at the moment',
+                style: const TextStyle(
+                  color: Color(0xFF64748B),
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 0.9,
+            ),
+            itemCount: specialtyList.length,
+            itemBuilder: (context, index) {
+              final specialtyString = specialtyList[index];
+              return _buildDynamicSpecialtyCard(specialtyString);
+            },
           ),
-          itemCount: _getSpecialtiesForService(_selectedService!).length,
-          itemBuilder: (context, index) {
-            final specialty = _getSpecialtiesForService(_selectedService!)[index];
-            return _buildSpecialtyCard(specialty);
-          },
-        ),
       ],
     );
   }
-
-  Widget _buildSpecialtyCard(Specialty specialty) {
-    final isSelected = _selectedSpecialty == specialty;
-    final specialtyInfo = _getSpecialtyInfo(specialty);
+  
+  /// Build specialty card from Firebase dynamic data (string-based)
+  Widget _buildDynamicSpecialtyCard(String specialtyString) {
+    final isSelected = _selectedSpecialtyString == specialtyString;
+    final isDoctor = _selectedService == ServiceType.doctor;
+    
+    // Get display name and icon for specialty
+    final displayName = _getSpecialtyDisplayName(specialtyString);
+    final icon = _getSpecialtyIcon(specialtyString, isDoctor);
     
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
@@ -685,13 +793,15 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
       child: GestureDetector(
         onTap: () {
           setState(() {
-            _selectedSpecialty = specialty;
+            _selectedSpecialtyString = specialtyString;
+            // Clear old enum-based selection
+            _selectedSpecialty = null;
           });
+          print('✅ Selected specialty: $specialtyString');
         },
         child: Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            // Glassmorphism effect like doctor/nurse cards
             gradient: isSelected 
                 ? LinearGradient(
                     begin: Alignment.topLeft,
@@ -720,7 +830,6 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
               width: 2,
             ),
             boxShadow: [
-              // Neon glow effect
               if (isSelected) ...[
                 BoxShadow(
                   color: const Color(0xFF6366F1).withOpacity(0.4),
@@ -735,7 +844,6 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
                   offset: const Offset(0, 20),
                 ),
               ],
-              // Soft shadow for unselected
               BoxShadow(
                 color: Colors.black.withOpacity(0.08),
                 blurRadius: 15,
@@ -748,7 +856,7 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
             crossAxisAlignment: CrossAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Enhanced Icon container with glassmorphic effect
+              // Icon container
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -777,7 +885,7 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
                   ],
                 ),
                 child: Icon(
-                  specialtyInfo.icon,
+                  icon,
                   color: isSelected 
                       ? const Color(0xFF6366F1)
                       : const Color(0xFF6366F1),
@@ -786,10 +894,10 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
               ),
               const SizedBox(height: 8),
               
-              // Enhanced Name with better typography - Fixed overflow
+              // Specialty name
               Expanded(
                 child: Text(
-                  specialtyInfo.name,
+                  displayName,
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12,
@@ -805,31 +913,7 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
                 ),
               ),
               
-              // Compact additional info to prevent overflow
-              if (specialtyInfo.estimatedTime != null) ...[
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: isSelected 
-                        ? Colors.white.withOpacity(0.2)
-                        : const Color(0xFF2563EB).withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '${specialtyInfo.estimatedTime}m',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isSelected 
-                          ? Colors.white.withOpacity(0.9)
-                          : const Color(0xFF2563EB).withOpacity(0.8),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-              
-              // Enhanced selection indicator
+              // Selection indicator
               if (isSelected) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -858,43 +942,52 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
       ),
     );
   }
-
-  List<Specialty> _getSpecialtiesForService(ServiceType serviceType) {
-    switch (serviceType) {
-      case ServiceType.doctor:
-        return [
-          Specialty.generalMedicine,
-          Specialty.cardiology,
-          Specialty.neurology,
-          Specialty.pediatrics,
-          Specialty.gynecology,
-          Specialty.orthopedics,
-          Specialty.dermatology,
-          Specialty.psychiatry,
-          Specialty.ophthalmology,
-          Specialty.ent,
-          Specialty.urology,
-          Specialty.gastroenterology,
-          Specialty.oncology,
-          Specialty.emergency,
-        ];
-      case ServiceType.nurse:
-        return [
-          Specialty.woundCare,
-          Specialty.medicationAdministration,
-          Specialty.vitalsMonitoring,
-          Specialty.injections,
-          Specialty.bloodDrawing,
-          Specialty.homeHealthAssessment,
-          Specialty.postSurgicalCare,
-          Specialty.chronicDiseaseManagement,
-          Specialty.elderCare,
-          Specialty.mobilityAssistance,
-          Specialty.medicationReminders,
-          Specialty.healthEducation,
-        ];
+  
+  /// Get display name for specialty string
+  String _getSpecialtyDisplayName(String specialtyString) {
+    final lower = specialtyString.toLowerCase();
+    
+    // Map common specialty strings to display names
+    final specialtyMap = {
+      'generaliste': 'Médecine Générale',
+      'general': 'Médecine Générale',
+      'general medicine': 'Médecine Générale',
+      'wound care': 'Soins des Plaies',
+      'blood drawing': 'Prélèvement Sanguin',
+      'soins infirmiers': 'Soins Infirmiers',
+      'injections': 'Injections',
+      'medication administration': 'Administration Médicaments',
+      'vitals monitoring': 'Surveillance des Signes Vitaux',
+    };
+    
+    return specialtyMap[lower] ?? specialtyString.split(' ').map((word) {
+      return word[0].toUpperCase() + word.substring(1);
+    }).join(' ');
+  }
+  
+  /// Get appropriate icon for specialty
+  IconData _getSpecialtyIcon(String specialtyString, bool isDoctor) {
+    final lower = specialtyString.toLowerCase();
+    
+    if (isDoctor) {
+      // Doctor specialty icons
+      if (lower.contains('general')) return Icons.medical_services_rounded;
+      if (lower.contains('cardio')) return Icons.favorite_rounded;
+      if (lower.contains('neuro')) return Icons.psychology_rounded;
+      if (lower.contains('pediatric')) return Icons.child_care_rounded;
+      return Icons.local_hospital_rounded;
+    } else {
+      // Nurse specialty icons
+      if (lower.contains('wound') || lower.contains('plaie')) return Icons.healing_rounded;
+      if (lower.contains('blood') || lower.contains('sanguin')) return Icons.bloodtype_rounded;
+      if (lower.contains('injection')) return Icons.medication_rounded;
+      if (lower.contains('vital') || lower.contains('monitoring')) return Icons.monitor_heart_rounded;
+      if (lower.contains('medication') || lower.contains('médicament')) return Icons.medication_liquid_rounded;
+      return Icons.health_and_safety_rounded;
     }
   }
+
+  // === OLD METHODS REMOVED - Now using Firebase dynamic data ===
 
   SpecialtyInfo _getSpecialtyInfo(Specialty specialty) {
     final specialtyId = specialty.toString().split('.').last;
@@ -934,10 +1027,12 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
   }
 
   Widget _buildNextButton() {
-    final canProceed = _selectedService != null && _selectedSpecialty != null;
+    // Check if specialty is selected (either old enum or new string-based)
+    final hasSpecialty = _selectedSpecialty != null || (_selectedSpecialtyString != null && _selectedSpecialtyString!.isNotEmpty);
+    final canProceed = _selectedService != null && hasSpecialty;
     final buttonText = _selectedService == null 
         ? 'Select Care Provider'
-        : _selectedSpecialty == null 
+        : !hasSpecialty 
             ? 'Choose Specialty'
             : 'Continue to Location';
             
@@ -1045,7 +1140,7 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
                       child: Icon(
                         _selectedService == null 
                             ? Icons.medical_services_outlined
-                            : _selectedSpecialty == null
+                            : !hasSpecialty
                                 ? Icons.psychology_outlined
                                 : Icons.location_on_outlined,
                         color: canProceed ? Colors.white : Colors.grey.shade500,
@@ -1121,13 +1216,24 @@ class _ServiceSelectionPageState extends State<ServiceSelectionPage>
   }
 
   void _navigateToLocation() {
-    if (_selectedService != null && _selectedSpecialty != null) {
+    // Check if we have either old enum or new string-based specialty
+    final hasSpecialty = _selectedSpecialty != null || (_selectedSpecialtyString != null && _selectedSpecialtyString!.isNotEmpty);
+    
+    if (_selectedService != null && hasSpecialty) {
+      // For backward compatibility with LocationSelectionPage, use default enum
+      final specialtyEnum = _selectedSpecialty ?? Specialty.generalMedicine;
+      
+      print('🚀 Navigating to location selection:');
+      print('   Service: $_selectedService');
+      print('   Specialty String: $_selectedSpecialtyString');
+      print('   Specialty Enum: $specialtyEnum');
+      
       Navigator.of(context).push(
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) =>
               LocationSelectionPage(
                 selectedService: _selectedService!,
-                selectedSpecialty: _selectedSpecialty!,
+                selectedSpecialty: specialtyEnum,
               ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             const begin = Offset(1.0, 0.0);
