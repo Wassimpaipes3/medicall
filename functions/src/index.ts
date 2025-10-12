@@ -220,33 +220,125 @@ export const onAppointmentCreated = functions.firestore
 
     const patientId = appointment.idpat;
     const doctorId = appointment.idpro;
-    const date = appointment.date;
-    const heure = appointment.heure;
-    // const note = appointment.note || 'Pas de note';
+    const service = appointment.service || "consultation";
+    const notes = appointment.notes || "";
 
-    // Get patient name
-    const patientDoc = await db.collection("patients").doc(patientId).get();
-    const patientName = patientDoc.exists ?
-      patientDoc.data()?.nom || "Un patient" :
-      "Un patient";
+    console.log(`📅 New appointment created: ${context.params.appId}`);
+    console.log(`   Patient: ${patientId}`);
+    console.log(`   Provider: ${doctorId}`);
+    console.log(`   Service: ${service}`);
 
-    // Notify doctor
-    await db.collection("notifications").add({
-      destinataire: doctorId,
-      message: `🔔 ${patientName} a réservé un rendez-vous le ${date} à ${heure}. Note: ${appointment.note || "Pas de note"}`,
-      type: "appointment",
-      datetime: admin.firestore.FieldValue.serverTimestamp(),
-      read: false,
-      senderId: patientId,
-      payload: {
-        appId: context.params.appId,
-        patientId: patientId,
-        action: "new_booking",
-      },
-    });
+    try {
+      // Get patient name
+      const patientDoc = await db.collection("patients").doc(patientId).get();
+      const patientName = patientDoc.exists ?
+        patientDoc.data()?.nom || "Un patient" :
+        "Un patient";
 
+      console.log(`   Patient name: ${patientName}`);
 
-    console.log(`📩 Notification sent to doctor ${doctorId}`);
+      // Get service name (translated)
+      const serviceName = service === "doctor" ? "consultation médicale" :
+        service === "nurse" ? "soin infirmier" : service;
+
+      // Create notification message
+      const message = notes ?
+        `🔔 ${patientName} a réservé un rendez-vous pour ${serviceName}. Note: ${notes}` :
+        `🔔 ${patientName} a réservé un rendez-vous pour ${serviceName}`;
+
+      // Notify provider
+      await db.collection("notifications").add({
+        destinataire: doctorId,
+        message: message,
+        type: "appointment",
+        datetime: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+        senderId: patientId,
+        payload: {
+          appId: context.params.appId,
+          patientId: patientId,
+          service: service,
+          action: "new_booking",
+        },
+      });
+
+      console.log(`📩 Notification sent to provider ${doctorId}`);
+      console.log(`   Message: ${message}`);
+    } catch (error) {
+      console.error("❌ Error sending appointment notification:", error);
+    }
+  });
+
+/**
+ * 2.5. When a message is sent → notify the recipient
+ */
+export const onMessageCreated = functions.firestore
+  .document("chats/{chatId}/messages/{messageId}")
+  .onCreate(async (snap, context) => {
+    const message = snap.data();
+    const chatId = context.params.chatId;
+    const senderId = message.senderId;
+
+    console.log(`💬 New message in chat ${chatId} from ${senderId}`);
+
+    try {
+      // Get chat document to find participants
+      const chatDoc = await db.collection("chats").doc(chatId).get();
+      if (!chatDoc.exists) {
+        console.log(`❌ Chat document not found: ${chatId}`);
+        return;
+      }
+
+      const chatData = chatDoc.data();
+      const participants = chatData?.participants || [];
+
+      console.log(`   Participants: ${participants.join(", ")}`);
+
+      // Find the recipient (the participant who is NOT the sender)
+      const recipientId = participants.find((id: string) => id !== senderId);
+
+      if (!recipientId) {
+        console.log(`❌ No recipient found in chat ${chatId}`);
+        return;
+      }
+
+      console.log(`   Recipient: ${recipientId}`);
+
+      // Get sender's name
+      let senderName = "Someone";
+      const senderUserDoc = await db.collection("users").doc(senderId).get();
+      if (senderUserDoc.exists) {
+        const senderData = senderUserDoc.data();
+        senderName = senderData?.nom || senderData?.name || "Someone";
+      }
+
+      console.log(`   Sender name: ${senderName}`);
+
+      // Get message content (truncate if too long)
+      const messageText = message.text || "New message";
+      const truncatedMessage = messageText.length > 50 ?
+        `${messageText.substring(0, 50)}...` :
+        messageText;
+
+      // Create notification for recipient
+      await db.collection("notifications").add({
+        destinataire: recipientId,
+        message: `💬 ${senderName} vous a envoyé un message: ${truncatedMessage}`,
+        type: "message",
+        datetime: admin.firestore.FieldValue.serverTimestamp(),
+        read: false,
+        senderId: senderId,
+        payload: {
+          chatId: chatId,
+          messageId: context.params.messageId,
+          action: "new_message",
+        },
+      });
+
+      console.log(`📩 Message notification sent to ${recipientId}`);
+    } catch (error) {
+      console.error("❌ Error sending message notification:", error);
+    }
   });
 
 /**
