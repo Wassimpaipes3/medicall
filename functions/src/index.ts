@@ -314,6 +314,16 @@ export const onMessageCreated = functions.firestore
 
       console.log(`   Sender name: ${senderName}`);
 
+      // Get sender's professional info (if available)
+      let senderProfession = "";
+      let senderSpecialty = "";
+      const senderProfessionalDoc = await db.collection("professionals").doc(senderId).get();
+      if (senderProfessionalDoc.exists) {
+        const professionalData = senderProfessionalDoc.data();
+        senderProfession = professionalData?.profession || "";
+        senderSpecialty = professionalData?.specialite || "";
+      }
+
       // Get message content (truncate if too long)
       const messageText = message.text || "New message";
       const truncatedMessage = messageText.length > 50 ?
@@ -332,6 +342,11 @@ export const onMessageCreated = functions.firestore
           chatId: chatId,
           messageId: context.params.messageId,
           action: "new_message",
+          // Include sender info for easier navigation
+          senderId: senderId,
+          senderName: senderName,
+          senderProfession: senderProfession,
+          senderSpecialty: senderSpecialty,
         },
       });
 
