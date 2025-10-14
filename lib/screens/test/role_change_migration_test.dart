@@ -228,24 +228,24 @@ class _RoleChangeMigrationTestState extends State<RoleChangeMigrationTest> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : () => _testRoleChange('patient'),
-                      child: Text('→ Patient'),
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.all(12),
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
                       ),
+                      child: Text('→ Patient'),
                     ),
                   ),
                   SizedBox(width: 8),
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : () => _testRoleChange('infirmier'),
-                      child: Text('→ Infirmier'),
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.all(12),
                         backgroundColor: Colors.purple,
                         foregroundColor: Colors.white,
                       ),
+                      child: Text('→ Infirmier'),
                     ),
                   ),
                 ],
@@ -258,24 +258,24 @@ class _RoleChangeMigrationTestState extends State<RoleChangeMigrationTest> {
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : () => _testRoleChange('docteur'),
-                      child: Text('→ Docteur'),
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.all(12),
                         backgroundColor: Colors.orange,
                         foregroundColor: Colors.white,
                       ),
+                      child: Text('→ Docteur'),
                     ),
                   ),
                   SizedBox(width: 8),
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : () => _testRoleChange('admin'),
-                      child: Text('→ Admin'),
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.all(12),
                         backgroundColor: Colors.red,
                         foregroundColor: Colors.white,
                       ),
+                      child: Text('→ Admin'),
                     ),
                   ),
                 ],

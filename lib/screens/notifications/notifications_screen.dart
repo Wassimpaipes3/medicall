@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
+import '../chat/patient_chat_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -15,54 +18,236 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
-  final List<Map<String, dynamic>> _notifications = [
-    {
-      'id': '1',
-      'title': 'Appointment Reminder',
-      'message': 'Your appointment with Dr. Sarah Johnson is tomorrow at 10:00 AM',
-      'time': '2 minutes ago',
-      'type': 'appointment',
-      'isRead': false,
-      'icon': Icons.calendar_today_rounded,
-      'color': Colors.blue,
-    },
-    {
-      'id': '2',
-      'title': 'Lab Results Available',
-      'message': 'Your blood test results are now available in the reports section',
-      'time': '1 hour ago',
-      'type': 'report',
-      'isRead': false,
-      'icon': Icons.assignment_rounded,
-      'color': Colors.green,
-    },
-    {
-      'id': '3',
-      'title': 'Medication Reminder',
-      'message': 'Time to take your evening medication',
-      'time': '3 hours ago',
-      'type': 'medication',
-      'isRead': true,
-      'icon': Icons.medication_rounded,
-      'color': Colors.orange,
-    },
-    {
-      'id': '4',
-      'title': 'New Message',
-      'message': 'Dr. Ahmed Hassan sent you a message regarding your treatment',
-      'time': '1 day ago',
-      'type': 'message',
-      'isRead': true,
-      'icon': Icons.message_rounded,
-      'color': Colors.purple,
-    },
-  ];
+  List<Map<String, dynamic>> _notifications = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
     _animationController.forward();
+    _loadNotifications();
+  }
+
+  /// Load notifications from Firebase
+  Future<void> _loadNotifications() async {
+    print('🔄 START: Loading notifications...');
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        print('❌ No user logged in');
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      print('🔔 Loading notifications for user: ${user.uid}');
+      print('   Collection: notifications');
+      print('   Filter: destinataire == ${user.uid}');
+
+      // Try without orderBy first to see if data exists
+      print('   Step 1: Checking if ANY notifications exist...');
+      final allNotificationsSnapshot = await FirebaseFirestore.instance
+          .collection('notifications')
+          .where('destinataire', isEqualTo: user.uid)
+          .limit(5)
+          .get();
+
+      print('   Found ${allNotificationsSnapshot.docs.length} notifications (without ordering)');
+      
+      if (allNotificationsSnapshot.docs.isEmpty) {
+        print('   ℹ️ No notifications found for this user');
+        setState(() {
+          _notifications = [];
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // Show sample notification structure
+      if (allNotificationsSnapshot.docs.isNotEmpty) {
+        final sampleDoc = allNotificationsSnapshot.docs.first;
+        print('   Sample notification data:');
+        print('   ${sampleDoc.data()}');
+      }
+
+      print('   Step 2: Loading with orderBy...');
+      final notificationsSnapshot = await FirebaseFirestore.instance
+          .collection('notifications')
+          .where('destinataire', isEqualTo: user.uid)
+          .orderBy('datetime', descending: true)
+          .limit(50)
+          .get();
+
+      print('   Found ${notificationsSnapshot.docs.length} notifications (with ordering)');
+
+      final List<Map<String, dynamic>> notifications = [];
+      for (var doc in notificationsSnapshot.docs) {
+        final data = doc.data();
+        
+        // Extract title from message (e.g., "🔔 Title text..." -> "Title")
+        String fullMessage = data['message'] ?? '';
+        String title = 'Notification';
+        String message = fullMessage;
+        
+        // Split message into title and body if it contains emoji or special format
+        if (fullMessage.contains('🔔')) {
+          fullMessage = fullMessage.replaceFirst('🔔', '').trim();
+          final parts = fullMessage.split('.');
+          if (parts.isNotEmpty) {
+            title = parts[0].trim();
+            if (parts.length > 1) {
+              message = parts.sublist(1).join('.').trim();
+            } else {
+              message = title;
+            }
+          }
+        }
+        
+        final notification = {
+          'id': doc.id,
+          'title': title,
+          'message': message.isNotEmpty ? message : fullMessage,
+          'time': _formatTimestamp(data['datetime']),
+          'type': data['type'] ?? 'general',
+          'isRead': data['read'] ?? false,
+          'icon': _getIconForType(data['type'] ?? 'general'),
+          'color': _getColorForType(data['type'] ?? 'general'),
+          'senderId': data['senderId'],
+          'payload': data['payload'],
+        };
+        notifications.add(notification);
+        print('   📬 $title: $message');
+      }
+
+      setState(() {
+        _notifications = notifications;
+        _isLoading = false;
+      });
+
+      print('✅ Loaded ${_notifications.length} notifications successfully');
+    } catch (e, stackTrace) {
+      print('❌ Error loading notifications: $e');
+      print('   Stack trace: $stackTrace');
+      
+      // Check for specific error types
+      if (e.toString().contains('index')) {
+        print('   ⚠️ INDEX ERROR: Firestore index might be missing!');
+        print('   Solution: Deploy firestore indexes with: firebase deploy --only firestore:indexes');
+      } else if (e.toString().contains('permission')) {
+        print('   ⚠️ PERMISSION ERROR: Check Firestore security rules!');
+      }
+      
+      setState(() {
+        _isLoading = false;
+      });
+      
+      // Show error to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading notifications: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Format Firestore timestamp to readable time ago
+  String _formatTimestamp(dynamic timestamp) {
+    if (timestamp == null) return 'Just now';
+    
+    try {
+      DateTime dateTime;
+      if (timestamp is Timestamp) {
+        dateTime = timestamp.toDate();
+      } else if (timestamp is String) {
+        dateTime = DateTime.parse(timestamp);
+      } else {
+        return 'Just now';
+      }
+
+      final difference = DateTime.now().difference(dateTime);
+
+      if (difference.inSeconds < 60) {
+        return 'Just now';
+      } else if (difference.inMinutes < 60) {
+        return '${difference.inMinutes} minute${difference.inMinutes > 1 ? 's' : ''} ago';
+      } else if (difference.inHours < 24) {
+        return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
+      } else if (difference.inDays < 30) {
+        final weeks = (difference.inDays / 7).floor();
+        return '$weeks week${weeks > 1 ? 's' : ''} ago';
+      } else {
+        final months = (difference.inDays / 30).floor();
+        return '$months month${months > 1 ? 's' : ''} ago';
+      }
+    } catch (e) {
+      return 'Recently';
+    }
+  }
+
+  /// Get icon based on notification type
+  IconData _getIconForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'appointment':
+      case 'rendez_vous':
+        return Icons.calendar_today_rounded;
+      case 'message':
+      case 'chat':
+        return Icons.message_rounded;
+      case 'report':
+      case 'rapport':
+      case 'result':
+        return Icons.assignment_rounded;
+      case 'medication':
+      case 'medicament':
+        return Icons.medication_rounded;
+      case 'payment':
+      case 'paiement':
+        return Icons.payment_rounded;
+      case 'booking':
+      case 'reservation':
+        return Icons.book_online_rounded;
+      default:
+        return Icons.notifications_rounded;
+    }
+  }
+
+  /// Get color based on notification type
+  Color _getColorForType(String type) {
+    switch (type.toLowerCase()) {
+      case 'appointment':
+      case 'rendez_vous':
+        return Colors.blue;
+      case 'message':
+      case 'chat':
+        return Colors.purple;
+      case 'report':
+      case 'rapport':
+      case 'result':
+        return Colors.green;
+      case 'medication':
+      case 'medicament':
+        return Colors.orange;
+      case 'payment':
+      case 'paiement':
+        return Colors.teal;
+      case 'booking':
+      case 'reservation':
+        return Colors.indigo;
+      default:
+        return AppTheme.primaryColor;
+    }
   }
 
   void _initializeAnimations() {
@@ -94,28 +279,233 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     super.dispose();
   }
 
-  void _markAsRead(String notificationId) {
-    setState(() {
-      final index = _notifications.indexWhere((n) => n['id'] == notificationId);
-      if (index != -1) {
-        _notifications[index]['isRead'] = true;
-      }
-    });
+  /// Mark notification as read in Firebase
+  Future<void> _markAsRead(String notificationId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(notificationId)
+          .update({'read': true});
+
+      setState(() {
+        final index = _notifications.indexWhere((n) => n['id'] == notificationId);
+        if (index != -1) {
+          _notifications[index]['isRead'] = true;
+        }
+      });
+
+      print('✅ Notification marked as read: $notificationId');
+    } catch (e) {
+      print('❌ Error marking notification as read: $e');
+    }
   }
 
-  void _markAllAsRead() {
-    setState(() {
-      for (var notification in _notifications) {
-        notification['isRead'] = true;
+  /// Mark all notifications as read in Firebase
+  Future<void> _markAllAsRead() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // Get all unread notifications
+      final unreadNotifications = await FirebaseFirestore.instance
+          .collection('notifications')
+          .where('destinataire', isEqualTo: user.uid)
+          .where('read', isEqualTo: false)
+          .get();
+
+      // Mark each as read
+      final batch = FirebaseFirestore.instance.batch();
+      for (var doc in unreadNotifications.docs) {
+        batch.update(doc.reference, {'read': true});
       }
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('All notifications marked as read'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+      await batch.commit();
+
+      setState(() {
+        for (var notification in _notifications) {
+          notification['isRead'] = true;
+        }
+      });
+
+      print('✅ All notifications marked as read');
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All notifications marked as read'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      print('❌ Error marking all notifications as read: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to mark notifications as read'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  /// Handle notification tap - Navigate to relevant screen
+  Future<void> _handleNotificationTap(Map<String, dynamic> notification) async {
+    final type = (notification['type'] ?? '').toLowerCase();
+    final payload = notification['payload'] as Map<String, dynamic>?;
+
+    print('🔔 Handling notification tap: type=$type');
+
+    try {
+      switch (type) {
+        case 'message':
+        case 'chat':
+          await _navigateToChat(notification, payload);
+          break;
+
+        case 'appointment':
+        case 'rendez_vous':
+        case 'booking':
+        case 'reservation':
+          // Navigate to appointments screen
+          if (mounted) {
+            Navigator.pushNamed(context, '/appointments');
+          }
+          break;
+
+        default:
+          print('ℹ️ No specific action for notification type: $type');
+          break;
+      }
+    } catch (e) {
+      print('❌ Error handling notification tap: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to open notification'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Navigate to chat screen with provider
+  Future<void> _navigateToChat(Map<String, dynamic> notification, Map<String, dynamic>? payload) async {
+    try {
+      final senderId = payload?['senderId'] ?? notification['senderId'];
+      
+      if (senderId == null || senderId.toString().isEmpty) {
+        print('❌ No sender ID found in notification');
+        return;
+      }
+
+      print('   Loading provider info for: $senderId');
+
+      // Fetch provider information from Firestore
+      final providerInfo = await _getProviderInfo(senderId);
+      
+      if (providerInfo == null) {
+        print('❌ Could not load provider information');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Unable to load provider information'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      print('✅ Provider info loaded, navigating to chat...');
+
+      // Navigate to patient chat screen
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PatientChatScreen(
+              doctorInfo: providerInfo,
+              appointmentId: payload?['appointmentId'],
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error navigating to chat: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening chat: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Get provider information from Firestore
+  Future<Map<String, dynamic>?> _getProviderInfo(String providerId) async {
+    try {
+      // First, get basic user info
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(providerId)
+          .get();
+
+      if (!userDoc.exists) {
+        print('❌ User not found: $providerId');
+        return null;
+      }
+
+      final userData = userDoc.data()!;
+      final prenom = userData['prenom'] ?? '';
+      final nom = userData['nom'] ?? '';
+      final photoProfile = userData['photo_profile'];
+
+      // Then get professional info
+      final professionalDoc = await FirebaseFirestore.instance
+          .collection('professionals')
+          .doc(providerId)
+          .get();
+
+      if (!professionalDoc.exists) {
+        print('❌ Professional not found: $providerId');
+        return null;
+      }
+
+      final professionalData = professionalDoc.data()!;
+      final profession = professionalData['profession'] ?? '';
+      final specialite = professionalData['specialite'] ?? '';
+      final photoUrl = professionalData['photo_url'];
+      
+      // Determine if nurse or doctor
+      final isNurse = profession.toLowerCase().contains('nurse') || 
+                     profession.toLowerCase().contains('infirmier');
+      
+      // Build name with proper prefix
+      final displayName = isNurse ? '$prenom $nom' : 'Dr. $prenom $nom';
+      
+      // Use photo_profile if available, otherwise photo_url
+      final avatar = photoProfile ?? photoUrl;
+
+      final providerInfo = {
+        'id': providerId,
+        'name': displayName,
+        'prenom': prenom,
+        'nom': nom,
+        'specialty': specialite,
+        'profession': profession,
+        'avatar': avatar,
+        'isNurse': isNurse,
+      };
+
+      print('   Provider info: $displayName (${isNurse ? 'Nurse' : 'Doctor'})');
+      
+      return providerInfo;
+    } catch (e) {
+      print('❌ Error fetching provider info: $e');
+      return null;
+    }
   }
 
   @override
@@ -178,21 +568,47 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Widget _buildNotificationsList() {
+    if (_isLoading) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Loading notifications...',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textSecondaryColor,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_notifications.isEmpty) {
       return _buildEmptyState();
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-      itemCount: _notifications.length + 1,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return _buildHeader();
-        }
-        
-        final notification = _notifications[index - 1];
-        return _buildNotificationCard(notification, index - 1);
-      },
+    return RefreshIndicator(
+      color: AppTheme.primaryColor,
+      onRefresh: _loadNotifications,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        itemCount: _notifications.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return _buildHeader();
+          }
+          
+          final notification = _notifications[index - 1];
+          return _buildNotificationCard(notification, index - 1);
+        },
+      ),
     );
   }
 
@@ -284,6 +700,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             if (!notification['isRead']) {
               _markAsRead(notification['id']);
             }
+            // Handle navigation based on notification type
+            _handleNotificationTap(notification);
           },
           child: Padding(
             padding: const EdgeInsets.all(16),

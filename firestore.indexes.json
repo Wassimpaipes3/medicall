@@ -41,6 +41,19 @@
                     "order": "DESCENDING"
                 }
             ]
+        },
+        {
+            "collectionGroup": "notifications",
+            "queryScope": "COLLECTION",
+            "fields": [{
+                    "fieldPath": "destinataire",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "datetime",
+                    "order": "DESCENDING"
+                }
+            ]
         }
     ],
     "fieldOverrides": []

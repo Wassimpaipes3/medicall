@@ -1,0 +1,65 @@
+// Test script to check notifications in Firestore
+// Run this in Firebase Console or use Firebase Admin SDK
+
+// Expected structure:
+// /notifications/{notificationId}
+// {
+//   destinataire: "userId",
+//   message: "notification text",
+//   type: "appointment" | "message" | etc,
+//   datetime: Timestamp,
+//   read: false,
+//   senderId: "senderId"
+// }
+
+// Steps to debug empty notification screen:
+
+1. Check Firestore Console
+   - Go to: https://console.firebase.google.com/project/nursinghomecare-1807f/firestore
+   - Navigate to: /notifications collection
+   - Check if ANY documents exist
+   - Check if documents have the correct structure
+
+2. Check logged-in user ID
+   - Flutter debug logs should show: "🔔 Loading notifications for user: [userId]"
+   - Make sure this userId matches the 'destinataire' field in Firestore
+
+3. Check Firestore index
+   - Error message: "The query requires an index"
+   - Solution: Run `firebase deploy --only firestore:indexes`
+   - Index needed: notifications (destinataire ASC, datetime DESC)
+
+4. Check security rules
+   - Users must be able to read their own notifications
+   - Rule: allow read: if request.auth.uid == resource.data.destinataire
+
+5. Test notification creation
+   - Send a message from provider to patient
+   - Check Cloud Functions logs: firebase functions:log
+   - Verify notification document was created
+
+// Quick Firestore query to check notifications (Firebase Console > Firestore > Run query):
+// Collection: notifications
+// Where: destinataire == [your_patient_user_id]
+// Order by: datetime desc
+
+// Common Issues:
+
+Issue 1: No notifications in database
+- Solution: Create test notification manually or send message from provider
+
+Issue 2: Missing Firestore index
+- Error: "index" in error message
+- Solution: firebase deploy --only firestore:indexes
+
+Issue 3: Wrong user ID
+- destinataire field doesn't match current user
+- Check user.uid in Flutter logs
+
+Issue 4: datetime field is null
+- Some notifications might have missing datetime
+- Add migration to fix old notifications
+
+Issue 5: Permission denied
+- Check firestore.rules
+- Verify user is authenticated
