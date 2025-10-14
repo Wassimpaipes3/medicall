@@ -54,6 +54,49 @@
                     "order": "DESCENDING"
                 }
             ]
+        },
+        {
+            "collectionGroup": "appointments",
+            "queryScope": "COLLECTION",
+            "fields": [{
+                    "fieldPath": "professionnelId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "dateRendezVous",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "appointments",
+            "queryScope": "COLLECTION",
+            "fields": [{
+                    "fieldPath": "etat",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "professionnelId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "dateRendezVous",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "avis",
+            "queryScope": "COLLECTION",
+            "fields": [{
+                    "fieldPath": "professionnelId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "dateCreation",
+                    "order": "ASCENDING"
+                }
+            ]
         }
     ],
     "fieldOverrides": []

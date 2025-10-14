@@ -21,34 +21,107 @@ class ProviderDashboardService {
       final todayStart = DateTime(now.year, now.month, now.day);
       final todayEnd = todayStart.add(const Duration(days: 1));
 
-      // Fetch appointments for today
-      final todayAppointments = await _firestore
+      print('   📅 Today range: ${todayStart.toIso8601String()} to ${todayEnd.toIso8601String()}');
+
+      // Fetch ALL appointments for provider first (to check both field names)
+      print('   🔍 Fetching all appointments...');
+      final allAppointmentsSnapshot = await _firestore
           .collection('appointments')
-          .where('professionnelId', isEqualTo: user.uid)
-          .where('dateRendezVous', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
-          .where('dateRendezVous', isLessThan: Timestamp.fromDate(todayEnd))
           .get();
 
-      // Fetch all appointments for provider (for overall stats)
-      final allAppointments = await _firestore
-          .collection('appointments')
-          .where('professionnelId', isEqualTo: user.uid)
-          .get();
+      print('   📦 Total appointments in collection: ${allAppointmentsSnapshot.docs.length}');
 
-      // Fetch reviews for provider
-      final reviews = await _firestore
+      // Debug: Show first few appointments to see field structure
+      if (allAppointmentsSnapshot.docs.isNotEmpty) {
+        print('   🔍 Checking first appointment structure:');
+        final firstDoc = allAppointmentsSnapshot.docs.first;
+        final firstData = firstDoc.data();
+        print('     Fields: ${firstData.keys.toList()}');
+        print('     idpro: ${firstData['idpro']}');
+        print('     professionnelId: ${firstData['professionnelId']}');
+        print('     etat: ${firstData['etat']}');
+        print('     status: ${firstData['status']}');
+        print('     dateRendezVous: ${firstData['dateRendezVous']}');
+      }
+
+      // Filter appointments manually for this provider (handles both idpro and professionnelId)
+      final allAppointments = allAppointmentsSnapshot.docs.where((doc) {
+        final data = doc.data();
+        final hasIdpro = data['idpro'] == user.uid;
+        final hasProfessionnelId = data['professionnelId'] == user.uid;
+        
+        if (hasIdpro || hasProfessionnelId) {
+          print('     ✅ Match found! Doc: ${doc.id}, idpro: ${data['idpro']}, professionnelId: ${data['professionnelId']}');
+        }
+        
+        return hasIdpro || hasProfessionnelId;
+      }).toList();
+
+      print('   ✅ Found ${allAppointments.length} total appointments for provider: ${user.uid}');
+      
+      if (allAppointments.isEmpty) {
+        print('   ⚠️ No appointments found for this provider!');
+        print('   💡 Make sure appointments have either:');
+        print('      - idpro = ${user.uid}');
+        print('      - professionnelId = ${user.uid}');
+      }
+
+      // Filter for today's appointments (check multiple date fields)
+      final todayAppointments = allAppointments.where((doc) {
+        final data = doc.data();
+        
+        // Try multiple date field names
+        final dateField = data['dateRendezVous'] ?? data['createdAt'] ?? data['updatedAt'];
+        if (dateField == null) {
+          print('     ⚠️ No date field found in appointment ${doc.id}');
+          return false;
+        }
+        
+        final appointmentDate = (dateField as Timestamp).toDate();
+        final isToday = appointmentDate.isAfter(todayStart) && appointmentDate.isBefore(todayEnd);
+        
+        if (isToday) {
+          print('     ✅ Today appointment: ${doc.id}, date: ${appointmentDate.toIso8601String()}, status: ${data['status'] ?? data['etat']}');
+        }
+        
+        return isToday;
+      }).toList();
+
+      print('   ✅ Found ${todayAppointments.length} appointments for today');
+
+      // Fetch reviews for provider (check both field names)
+      print('   🔍 Fetching reviews...');
+      final allReviews = await _firestore
           .collection('avis')
-          .where('professionnelId', isEqualTo: user.uid)
           .get();
+      
+      print('   📦 Total reviews in collection: ${allReviews.docs.length}');
+      
+      if (allReviews.docs.isNotEmpty) {
+        print('   🔍 Checking first review structure:');
+        final firstReview = allReviews.docs.first;
+        final reviewData = firstReview.data();
+        print('     Fields: ${reviewData.keys.toList()}');
+        print('     idpro: ${reviewData['idpro']}');
+        print('     professionnelId: ${reviewData['professionnelId']}');
+      }
+      
+      final reviews = allReviews.docs.where((doc) {
+        final data = doc.data();
+        return data['idpro'] == user.uid || data['professionnelId'] == user.uid;
+      }).toList();
+
+      print('   ✅ Found ${reviews.length} reviews for provider: ${user.uid}');
 
       // Calculate statistics
-      final stats = _calculateStats(todayAppointments, allAppointments, reviews);
+      final stats = _calculateStatsFromDocs(todayAppointments, allAppointments, reviews);
       
       print('✅ Dashboard stats calculated: ${stats.toString()}');
       return stats;
 
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('❌ Error fetching dashboard stats: $e');
+      print('   Stack trace: $stackTrace');
       // Return default stats on error
       return DashboardStats(
         todayEarnings: 0,
@@ -59,61 +132,103 @@ class ProviderDashboardService {
     }
   }
 
-  /// Calculate statistics from appointments and reviews
-  static DashboardStats _calculateStats(
-    QuerySnapshot todayAppointments,
-    QuerySnapshot allAppointments,
-    QuerySnapshot reviews,
+  /// Calculate statistics from appointments and reviews (using filtered docs)
+  static DashboardStats _calculateStatsFromDocs(
+    List<QueryDocumentSnapshot> todayAppointments,
+    List<QueryDocumentSnapshot> allAppointments,
+    List<QueryDocumentSnapshot> reviews,
   ) {
     // Today's earnings calculation
     double todayEarnings = 0;
     int completedToday = 0;
     int pendingToday = 0;
 
-    for (var appointment in todayAppointments.docs) {
+    print('   📊 Calculating today\'s stats from ${todayAppointments.length} appointments...');
+    
+    for (var appointment in todayAppointments) {
       final data = appointment.data() as Map<String, dynamic>;
       final etat = data['etat'] as String?;
-      final tarif = (data['tarif'] as num?)?.toDouble() ?? 100.0; // Default consultation fee
+      final status = data['status'] as String?;
+      final tarif = (data['tarif'] as num?)?.toDouble() ?? 
+                    (data['prix'] as num?)?.toDouble() ?? 
+                    (data['price'] as num?)?.toDouble() ?? 100.0;
 
-      if (etat == 'confirmé' || etat == 'terminé') {
+      print('     Appointment ${appointment.id}: etat=$etat, status=$status, tarif=$tarif');
+
+      // Check both French and English status fields (including 'accepted')
+      if (etat == 'confirmé' || etat == 'terminé' || etat == 'completed' ||
+          status == 'confirmed' || status == 'completed' || status == 'accepted') {
         todayEarnings += tarif;
         completedToday++;
-      } else if (etat == 'en_attente' || etat == 'pending') {
+        print('       ✅ Counted as completed, adding $tarif to earnings');
+      } else if (etat == 'en_attente' || etat == 'pending' || 
+                 status == 'pending' || status == 'en_attente') {
         pendingToday++;
+        print('       ⏳ Counted as pending');
+      } else {
+        print('       ⚠️ Status not recognized for earnings calculation');
       }
     }
 
+    print('   💰 Today earnings: \$${todayEarnings.round()}, Completed: $completedToday, Pending: $pendingToday');
+
     // Calculate overall completed tasks (from all appointments)
     int totalCompleted = 0;
-    for (var appointment in allAppointments.docs) {
+    for (var appointment in allAppointments) {
       final data = appointment.data() as Map<String, dynamic>;
       final etat = data['etat'] as String?;
+      final status = data['status'] as String?;
       
-      if (etat == 'confirmé' || etat == 'terminé') {
+      // Include 'accepted' status as completed
+      if (etat == 'confirmé' || etat == 'terminé' || etat == 'completed' ||
+          status == 'confirmed' || status == 'completed' || status == 'accepted') {
         totalCompleted++;
       }
     }
 
+    print('   ✅ Total completed appointments: $totalCompleted');
+
     // Calculate average rating
     double averageRating = 0.0;
-    if (reviews.docs.isNotEmpty) {
+    if (reviews.isNotEmpty) {
       double totalRating = 0;
-      for (var review in reviews.docs) {
+      int validRatings = 0;
+      
+      for (var review in reviews) {
         final data = review.data() as Map<String, dynamic>;
         final rating = (data['note'] as num?)?.toDouble() ?? 
                       (data['rating'] as num?)?.toDouble() ?? 
                       (data['etoiles'] as num?)?.toDouble() ?? 0.0;
-        totalRating += rating;
+        if (rating > 0) {
+          totalRating += rating;
+          validRatings++;
+        }
       }
-      averageRating = totalRating / reviews.docs.length;
+      
+      if (validRatings > 0) {
+        averageRating = totalRating / validRatings;
+      }
     }
 
-    return DashboardStats(
+    print('   ⭐ Average rating: ${averageRating.toStringAsFixed(1)} from ${reviews.length} reviews');
+
+    final stats = DashboardStats(
       todayEarnings: todayEarnings.round(),
       completedTasks: totalCompleted,
       pendingTasks: pendingToday,
       averageRating: averageRating,
     );
+    
+    print('');
+    print('📊 ===== FINAL DASHBOARD STATS =====');
+    print('   💰 Today Earnings: \$${stats.todayEarnings}');
+    print('   ✅ Completed Tasks: ${stats.completedTasks}');
+    print('   ⏳ Pending Tasks: ${stats.pendingTasks}');
+    print('   ⭐ Average Rating: ${stats.averageRating.toStringAsFixed(1)}');
+    print('=====================================');
+    print('');
+    
+    return stats;
   }
 
   /// Get pending appointment requests for provider
@@ -122,15 +237,31 @@ class ProviderDashboardService {
       final user = _auth.currentUser;
       if (user == null) return [];
 
-      final pendingAppointments = await _firestore
+      // Fetch all appointments and filter manually (handles both idpro and professionnelId)
+      final allAppointments = await _firestore
           .collection('appointments')
-          .where('professionnelId', isEqualTo: user.uid)
-          .where('etat', whereIn: ['en_attente', 'pending'])
-          .orderBy('dateRendezVous', descending: false)
-          .limit(10)
           .get();
+      
+      final pendingAppointments = allAppointments.docs.where((doc) {
+        final data = doc.data();
+        final isMyAppointment = data['idpro'] == user.uid || data['professionnelId'] == user.uid;
+        final etat = data['etat'] as String?;
+        final status = data['status'] as String?;
+        final isPending = etat == 'en_attente' || etat == 'pending' || 
+                         status == 'pending' || status == 'en_attente';
+        return isMyAppointment && isPending;
+      }).toList();
 
-      return pendingAppointments.docs.map((doc) {
+      // Sort by date and limit to 10
+      pendingAppointments.sort((a, b) {
+        final aDate = (a.data()['dateRendezVous'] as Timestamp?)?.toDate() ?? DateTime.now();
+        final bDate = (b.data()['dateRendezVous'] as Timestamp?)?.toDate() ?? DateTime.now();
+        return aDate.compareTo(bDate);
+      });
+
+      final limitedPending = pendingAppointments.take(10).toList();
+
+      return limitedPending.map((doc) {
         final data = doc.data();
         return AppointmentRequest.fromFirestore(doc.id, data);
       }).toList();
@@ -151,18 +282,35 @@ class ProviderDashboardService {
       final monthStart = DateTime(now.year, now.month, 1);
       final monthEnd = DateTime(now.year, now.month + 1, 1);
 
-      final monthlyAppointments = await _firestore
+      // Fetch all appointments and filter manually
+      final allAppointments = await _firestore
           .collection('appointments')
-          .where('professionnelId', isEqualTo: user.uid)
-          .where('etat', whereIn: ['confirmé', 'terminé'])
-          .where('dateRendezVous', isGreaterThanOrEqualTo: Timestamp.fromDate(monthStart))
-          .where('dateRendezVous', isLessThan: Timestamp.fromDate(monthEnd))
           .get();
+      
+      final monthlyAppointments = allAppointments.docs.where((doc) {
+        final data = doc.data();
+        final isMyAppointment = data['idpro'] == user.uid || data['professionnelId'] == user.uid;
+        if (!isMyAppointment) return false;
+        
+        final etat = data['etat'] as String?;
+        final status = data['status'] as String?;
+        final isCompleted = etat == 'confirmé' || etat == 'terminé' || etat == 'completed' ||
+                           status == 'confirmed' || status == 'completed';
+        if (!isCompleted) return false;
+        
+        final dateRendezVous = data['dateRendezVous'] as Timestamp?;
+        if (dateRendezVous == null) return false;
+        
+        final appointmentDate = dateRendezVous.toDate();
+        return appointmentDate.isAfter(monthStart) && appointmentDate.isBefore(monthEnd);
+      }).toList();
 
       double monthlyEarnings = 0;
-      for (var appointment in monthlyAppointments.docs) {
+      for (var appointment in monthlyAppointments) {
         final data = appointment.data();
-        final tarif = (data['tarif'] as num?)?.toDouble() ?? 100.0;
+        final tarif = (data['tarif'] as num?)?.toDouble() ?? 
+                     (data['prix'] as num?)?.toDouble() ?? 
+                     (data['price'] as num?)?.toDouble() ?? 100.0;
         monthlyEarnings += tarif;
       }
 

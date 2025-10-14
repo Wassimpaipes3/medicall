@@ -168,16 +168,27 @@ class ProviderAnalyticsService {
           break;
       }
 
-      final reviews = await _firestore
+      // Fetch all reviews and filter manually
+      final allReviews = await _firestore
           .collection('avis')
-          .where('professionnelId', isEqualTo: user.uid)
-          .where('dateCreation', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
           .get();
 
       Map<int, int> ratingCounts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
       
-      for (var review in reviews.docs) {
+      for (var review in allReviews.docs) {
         final data = review.data();
+        
+        // Check provider ID (support multiple field names)
+        final providerId = data['idpro'] as String? ?? data['professionnelId'] as String?;
+        if (providerId != user.uid) continue;
+        
+        // Check date (support multiple field names)
+        final dateField = data['dateCreation'] ?? data['createdAt'] ?? data['date'];
+        if (dateField != null) {
+          final reviewDate = (dateField as Timestamp).toDate();
+          if (reviewDate.isBefore(startDate)) continue;
+        }
+        
         final rating = (data['note'] as num?)?.round() ?? 
                       (data['rating'] as num?)?.round() ?? 
                       (data['etoiles'] as num?)?.round() ?? 0;
@@ -199,19 +210,36 @@ class ProviderAnalyticsService {
 
   /// Helper method to get earnings for a specific period
   static Future<double> _getEarningsForPeriod(String userId, DateTime start, DateTime end) async {
-    final appointments = await _firestore
+    // Fetch all appointments and filter manually to avoid complex index requirements
+    final allAppointments = await _firestore
         .collection('appointments')
-        .where('professionnelId', isEqualTo: userId)
-        .where('etat', whereIn: ['confirmé', 'terminé'])
-        .where('dateRendezVous', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-        .where('dateRendezVous', isLessThan: Timestamp.fromDate(end))
         .get();
 
     double total = 0;
-    for (var appointment in appointments.docs) {
+    for (var appointment in allAppointments.docs) {
       final data = appointment.data();
-      final tarif = (data['tarif'] as num?)?.toDouble() ?? 100.0;
-      total += tarif;
+      
+      // Check provider ID (support multiple field names)
+      final providerId = data['idpro'] as String? ?? data['professionnelId'] as String?;
+      if (providerId != userId) continue;
+      
+      // Check status (support multiple field names)
+      final status = data['status'] as String? ?? data['etat'] as String?;
+      if (status != 'accepted' && status != 'completed' && status != 'confirmé' && status != 'terminé') continue;
+      
+      // Check date (support multiple field names)
+      final dateField = data['createdAt'] ?? data['updatedAt'] ?? data['dateRendezVous'];
+      if (dateField == null) continue;
+      
+      final appointmentDate = (dateField as Timestamp).toDate();
+      if (appointmentDate.isBefore(start) || appointmentDate.isAfter(end)) continue;
+      
+      // Get price (support multiple field names)
+      final price = (data['prix'] as num?)?.toDouble() ?? 
+                   (data['tarif'] as num?)?.toDouble() ?? 
+                   (data['price'] as num?)?.toDouble() ?? 
+                   100.0;
+      total += price;
     }
     
     return total;
@@ -223,32 +251,45 @@ class ProviderAnalyticsService {
     DateTime start, 
     DateTime end,
   ) async {
-    final appointments = await _firestore
+    // Fetch all appointments and filter manually
+    final allAppointments = await _firestore
         .collection('appointments')
-        .where('professionnelId', isEqualTo: userId)
-        .where('dateRendezVous', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
-        .where('dateRendezVous', isLessThan: Timestamp.fromDate(end))
         .get();
 
     int completed = 0;
     int pending = 0;
     int cancelled = 0;
 
-    for (var appointment in appointments.docs) {
+    for (var appointment in allAppointments.docs) {
       final data = appointment.data();
-      final etat = data['etat'] as String?;
       
-      switch (etat) {
+      // Check provider ID (support multiple field names)
+      final providerId = data['idpro'] as String? ?? data['professionnelId'] as String?;
+      if (providerId != userId) continue;
+      
+      // Check date (support multiple field names)
+      final dateField = data['createdAt'] ?? data['updatedAt'] ?? data['dateRendezVous'];
+      if (dateField == null) continue;
+      
+      final appointmentDate = (dateField as Timestamp).toDate();
+      if (appointmentDate.isBefore(start) || appointmentDate.isAfter(end)) continue;
+      
+      // Check status (support multiple field names)
+      final status = data['status'] as String? ?? data['etat'] as String?;
+      
+      switch (status) {
+        case 'accepted':
+        case 'completed':
         case 'confirmé':
         case 'terminé':
           completed++;
           break;
-        case 'en_attente':
         case 'pending':
+        case 'en_attente':
           pending++;
           break;
-        case 'annulé':
         case 'cancelled':
+        case 'annulé':
           cancelled++;
           break;
       }

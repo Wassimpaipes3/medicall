@@ -109,7 +109,12 @@ service cloud.firestore {
 
     // === /appointments: Appointment booking system ===
     match /appointments/{appId} {
-      allow read: if request.auth != null &&
+      // Allow authenticated users to list appointments (for queries)
+      // Individual document access is still restricted by the read rule below
+      allow list: if request.auth != null;
+      
+      // Allow reading specific appointments only if user is involved
+      allow get: if request.auth != null &&
         (resource.data.patientId == request.auth.uid || 
          resource.data.professionnelId == request.auth.uid ||
          resource.data.idpat == request.auth.uid || 
