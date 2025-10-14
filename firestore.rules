@@ -181,7 +181,17 @@ service cloud.firestore {
       allow read: if request.auth != null
         && resource.data.destinataire == request.auth.uid;
 
-      allow write: if false; // Only Cloud Functions can write
+      // Allow users to update their own notifications (mark as read)
+      allow update: if request.auth != null
+        && resource.data.destinataire == request.auth.uid
+        && request.resource.data.destinataire == resource.data.destinataire; // Cannot change owner
+
+      // Allow users to delete their own notifications
+      allow delete: if request.auth != null
+        && resource.data.destinataire == request.auth.uid;
+
+      // Only Cloud Functions can create notifications
+      allow create: if false;
     }
 
     // === /chats: Real-time messaging system ===

@@ -125,9 +125,8 @@ class MyApp extends StatelessWidget {
         AppRoutes.doctors: (context) => RouteGuard.patientRouteGuard(
           child: const AllDoctorsScreen(),
         ),
-        AppRoutes.notifications: (context) => RouteGuard.patientRouteGuard(
-          child: const NotificationsScreen(),
-        ),
+        // Notifications accessible to BOTH patients AND providers
+        AppRoutes.notifications: (context) => const NotificationsScreen(),
         AppRoutes.serviceSelection: (context) => const ServiceSelectionPage(),
         AppRoutes.appointments: (context) => const AppointmentsPage(),
         AppRoutes.liveTracking: (context) {

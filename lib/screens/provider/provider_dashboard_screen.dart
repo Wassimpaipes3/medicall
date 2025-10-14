@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
 import '../../models/provider/provider_model.dart';
 import '../../services/provider_location_service.dart';
@@ -424,16 +426,60 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                 ),
               ),
               
-              // Settings
-              IconButton(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  _showSettingsBottomSheet();
+              // Notification Bell Icon with Unread Badge
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('notifications')
+                    .where('destinataire', isEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '')
+                    .where('read', isEqualTo: false)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  final unreadCount = snapshot.data?.docs.length ?? 0;
+                  
+                  return Stack(
+                    children: [
+                      IconButton(
+                        onPressed: () {
+                          HapticFeedback.lightImpact();
+                          // Navigate to notifications screen
+                          Navigator.pushNamed(context, '/notifications');
+                        },
+                        icon: Icon(
+                          Icons.notifications_outlined,
+                          color: Colors.grey.shade600,
+                          size: 26,
+                        ),
+                      ),
+                      // Unread badge
+                      if (unreadCount > 0)
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 1.5),
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 18,
+                              minHeight: 18,
+                            ),
+                            child: Text(
+                              unreadCount > 99 ? '99+' : '$unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
                 },
-                icon: Icon(
-                  Icons.settings_outlined,
-                  color: Colors.grey.shade600,
-                ),
               ),
             ],
           ),
@@ -463,7 +509,9 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
           _buildStatsCards(),
           const SizedBox(height: 24),
           
-
+          // Earnings Trend Chart
+          _buildEarningsTrend(),
+          const SizedBox(height: 24),
           
           _buildActiveRequests(),
           const SizedBox(height: 24),
@@ -549,6 +597,192 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         ],
       ],
     );
+  }
+
+  /// Build earnings trend chart widget
+  Widget _buildEarningsTrend() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Earnings Trend',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimaryColor,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _navigateToAnalytics('earnings'),
+                icon: const Icon(Icons.arrow_forward, size: 16),
+                label: const Text('View All'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.primaryColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          // Simple bar chart visualization using containers
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('appointments')
+                .where('professionnelId', isEqualTo: FirebaseAuth.instance.currentUser?.uid ?? '')
+                .where('etat', whereIn: ['confirmé', 'terminé'])
+                .orderBy('dateRendezVous', descending: true)
+                .limit(50)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text('Error loading chart',
+                      style: TextStyle(color: Colors.grey.shade600)),
+                );
+              }
+
+              if (!snapshot.hasData) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              // Calculate last 7 days earnings
+              final Map<int, double> weeklyEarnings = {};
+              final now = DateTime.now();
+              
+              // Initialize last 7 days
+              for (int i = 6; i >= 0; i--) {
+                final date = now.subtract(Duration(days: i));
+                final dayKey = date.day;
+                weeklyEarnings[dayKey] = 0.0;
+              }
+
+              // Aggregate earnings by day
+              for (var doc in snapshot.data!.docs) {
+                final data = doc.data() as Map<String, dynamic>;
+                final dateRendezVous = (data['dateRendezVous'] as Timestamp?)?.toDate();
+                final tarif = (data['tarif'] as num?)?.toDouble() ?? 100.0;
+                
+                if (dateRendezVous != null) {
+                  final daysDiff = now.difference(dateRendezVous).inDays;
+                  if (daysDiff >= 0 && daysDiff < 7) {
+                    final dayKey = dateRendezVous.day;
+                    weeklyEarnings[dayKey] = (weeklyEarnings[dayKey] ?? 0) + tarif;
+                  }
+                }
+              }
+
+              final maxEarning = weeklyEarnings.values.isEmpty 
+                  ? 100.0 
+                  : weeklyEarnings.values.reduce((a, b) => a > b ? a : b);
+              
+              if (maxEarning == 0) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Text(
+                      'No earnings data yet',
+                      style: TextStyle(color: Colors.grey.shade600),
+                    ),
+                  ),
+                );
+              }
+
+              return SizedBox(
+                height: 180,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: List.generate(7, (index) {
+                    final date = now.subtract(Duration(days: 6 - index));
+                    final dayKey = date.day;
+                    final earnings = weeklyEarnings[dayKey] ?? 0.0;
+                    final heightPercent = maxEarning > 0 ? earnings / maxEarning : 0.0;
+                    
+                    return Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            // Earnings amount
+                            if (earnings > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 4.0),
+                                child: Text(
+                                  '\$${earnings.toInt()}',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.primaryColor,
+                                  ),
+                                ),
+                              ),
+                            // Bar
+                            Container(
+                              height: (heightPercent * 120).clamp(4.0, 120.0),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    AppTheme.primaryColor,
+                                    AppTheme.primaryColor.withOpacity(0.6),
+                                  ],
+                                ),
+                                borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(8),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            // Day label
+                            Text(
+                              _getDayLabel(date),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade600,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Get short day label (Mon, Tue, etc.)
+  String _getDayLabel(DateTime date) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return days[date.weekday - 1];
   }
 
   Widget _buildStatCard({

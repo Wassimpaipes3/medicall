@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
 import '../chat/patient_chat_screen.dart';
+import '../provider/comprehensive_provider_chat_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -20,6 +21,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   List<Map<String, dynamic>> _notifications = [];
   bool _isLoading = true;
+  bool _isSelectionMode = false;
+  Set<String> _selectedNotifications = {};
 
   @override
   void initState() {
@@ -346,6 +349,171 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
+  /// Delete a single notification
+  Future<void> _deleteNotification(String notificationId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(notificationId)
+          .delete();
+
+      setState(() {
+        _notifications.removeWhere((n) => n['id'] == notificationId);
+        _selectedNotifications.remove(notificationId);
+      });
+
+      print('✅ Notification deleted: $notificationId');
+    } catch (e) {
+      print('❌ Error deleting notification: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to delete notification'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Delete selected notifications
+  Future<void> _deleteSelectedNotifications() async {
+    if (_selectedNotifications.isEmpty) return;
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      
+      for (var notificationId in _selectedNotifications) {
+        final docRef = FirebaseFirestore.instance
+            .collection('notifications')
+            .doc(notificationId);
+        batch.delete(docRef);
+      }
+
+      await batch.commit();
+
+      setState(() {
+        _notifications.removeWhere((n) => _selectedNotifications.contains(n['id']));
+        final count = _selectedNotifications.length;
+        _selectedNotifications.clear();
+        _isSelectionMode = false;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$count notification${count > 1 ? 's' : ''} deleted'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      });
+
+      print('✅ Deleted ${_selectedNotifications.length} notifications');
+    } catch (e) {
+      print('❌ Error deleting selected notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to delete notifications'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Delete all notifications
+  Future<void> _deleteAllNotifications() async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete All Notifications?'),
+        content: Text('This will permanently delete all ${_notifications.length} notifications. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // Get all user's notifications
+      final allNotifications = await FirebaseFirestore.instance
+          .collection('notifications')
+          .where('destinataire', isEqualTo: user.uid)
+          .get();
+
+      // Delete in batch
+      final batch = FirebaseFirestore.instance.batch();
+      for (var doc in allNotifications.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+
+      setState(() {
+        _notifications.clear();
+        _selectedNotifications.clear();
+        _isSelectionMode = false;
+      });
+
+      print('✅ All notifications deleted');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('All notifications deleted'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error deleting all notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to delete notifications'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Toggle selection mode
+  void _toggleSelectionMode() {
+    setState(() {
+      _isSelectionMode = !_isSelectionMode;
+      if (!_isSelectionMode) {
+        _selectedNotifications.clear();
+      }
+    });
+  }
+
+  /// Toggle notification selection
+  void _toggleNotificationSelection(String notificationId) {
+    setState(() {
+      if (_selectedNotifications.contains(notificationId)) {
+        _selectedNotifications.remove(notificationId);
+      } else {
+        _selectedNotifications.add(notificationId);
+      }
+    });
+  }
+
   /// Handle notification tap - Navigate to relevant screen
   Future<void> _handleNotificationTap(Map<String, dynamic> notification) async {
     final type = (notification['type'] ?? '').toLowerCase();
@@ -388,27 +556,48 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
-  /// Navigate to chat screen with provider
+  /// Navigate to appropriate chat screen based on user role
   Future<void> _navigateToChat(Map<String, dynamic> notification, Map<String, dynamic>? payload) async {
     try {
       final senderId = payload?['senderId'] ?? notification['senderId'];
+      final currentUser = FirebaseAuth.instance.currentUser;
       
       if (senderId == null || senderId.toString().isEmpty) {
         print('❌ No sender ID found in notification');
         return;
       }
 
-      print('   Loading provider info for: $senderId');
+      if (currentUser == null) {
+        print('❌ No user logged in');
+        return;
+      }
 
-      // Fetch provider information from Firestore
-      final providerInfo = await _getProviderInfo(senderId);
+      print('   Loading sender info for: $senderId');
+      print('   Current user: ${currentUser.uid}');
+
+      // Get current user's role
+      final currentUserDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
       
-      if (providerInfo == null) {
-        print('❌ Could not load provider information');
+      if (!currentUserDoc.exists) {
+        print('❌ Current user document not found');
+        return;
+      }
+
+      final currentUserRole = currentUserDoc.data()?['role'] ?? 'patient';
+      print('   Current user role: $currentUserRole');
+
+      // Fetch sender information from Firestore
+      final senderInfo = await _getProviderInfo(senderId);
+      
+      if (senderInfo == null) {
+        print('❌ Could not load sender information');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Unable to load provider information'),
+              content: Text('Unable to load sender information'),
               backgroundColor: Colors.red,
             ),
           );
@@ -416,19 +605,51 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         return;
       }
 
-      print('✅ Provider info loaded, navigating to chat...');
+      print('✅ Sender info loaded: ${senderInfo['name']} (${senderInfo['role']})');
 
-      // Navigate to patient chat screen
+      // Navigate to appropriate chat screen based on current user's role
       if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PatientChatScreen(
-              doctorInfo: providerInfo,
-              appointmentId: payload?['appointmentId'],
+        if (currentUserRole == 'patient') {
+          // Patient tapped notification from provider -> PatientChatScreen
+          print('   Navigating to PatientChatScreen...');
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PatientChatScreen(
+                doctorInfo: senderInfo,
+                appointmentId: payload?['appointmentId'],
+              ),
             ),
-          ),
-        );
+          );
+        } else {
+          // Provider tapped notification from patient -> ComprehensiveProviderChatScreen
+          print('   Navigating to ComprehensiveProviderChatScreen...');
+          
+          // Build conversation object for ComprehensiveProviderChatScreen
+          final conversationData = {
+            'id': senderId,
+            'userId': senderId,
+            'patientId': senderId,
+            'patientName': senderInfo['name'],
+            'patientAvatar': senderInfo['avatar'],
+            'lastMessage': notification['message'] ?? 'New message',
+            'lastMessageTime': notification['time'] ?? 'Now',
+            'unreadCount': 0,
+            'isOnline': true,
+            'serviceType': 'Chat',
+            'status': 'active',
+            'timestamp': DateTime.now(),
+          };
+          
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ComprehensiveProviderChatScreen(
+                conversation: conversationData,
+              ),
+            ),
+          );
+        }
       }
     } catch (e) {
       print('❌ Error navigating to chat: $e');
@@ -443,17 +664,18 @@ class _NotificationsScreenState extends State<NotificationsScreen>
     }
   }
 
-  /// Get provider information from Firestore
-  Future<Map<String, dynamic>?> _getProviderInfo(String providerId) async {
+  /// Get provider/user information from Firestore
+  /// Works for both professionals (doctors/nurses) and patients
+  Future<Map<String, dynamic>?> _getProviderInfo(String userId) async {
     try {
       // First, get basic user info
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
-          .doc(providerId)
+          .doc(userId)
           .get();
 
       if (!userDoc.exists) {
-        print('❌ User not found: $providerId');
+        print('❌ User not found: $userId');
         return null;
       }
 
@@ -461,35 +683,47 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       final prenom = userData['prenom'] ?? '';
       final nom = userData['nom'] ?? '';
       final photoProfile = userData['photo_profile'];
+      final role = userData['role'] ?? 'patient';
 
-      // Then get professional info
+      // Try to get professional info (might not exist if sender is a patient)
       final professionalDoc = await FirebaseFirestore.instance
           .collection('professionals')
-          .doc(providerId)
+          .doc(userId)
           .get();
 
-      if (!professionalDoc.exists) {
-        print('❌ Professional not found: $providerId');
-        return null;
+      String displayName;
+      String profession = '';
+      String specialite = '';
+      bool isNurse = false;
+      String? avatar = photoProfile;
+
+      if (professionalDoc.exists) {
+        // This is a professional (doctor/nurse)
+        final professionalData = professionalDoc.data()!;
+        profession = professionalData['profession'] ?? '';
+        specialite = professionalData['specialite'] ?? '';
+        final photoUrl = professionalData['photo_url'];
+        
+        // Determine if nurse or doctor
+        isNurse = profession.toLowerCase().contains('nurse') || 
+                  profession.toLowerCase().contains('infirmier');
+        
+        // Build name with proper prefix
+        displayName = isNurse ? '$prenom $nom' : 'Dr. $prenom $nom';
+        
+        // Use photo_profile if available, otherwise photo_url
+        avatar = photoProfile ?? photoUrl;
+        
+        print('   Professional info: $displayName (${isNurse ? 'Nurse' : 'Doctor'})');
+      } else {
+        // This is a patient or regular user
+        displayName = '$prenom $nom';
+        profession = 'patient';
+        print('   Patient info: $displayName');
       }
 
-      final professionalData = professionalDoc.data()!;
-      final profession = professionalData['profession'] ?? '';
-      final specialite = professionalData['specialite'] ?? '';
-      final photoUrl = professionalData['photo_url'];
-      
-      // Determine if nurse or doctor
-      final isNurse = profession.toLowerCase().contains('nurse') || 
-                     profession.toLowerCase().contains('infirmier');
-      
-      // Build name with proper prefix
-      final displayName = isNurse ? '$prenom $nom' : 'Dr. $prenom $nom';
-      
-      // Use photo_profile if available, otherwise photo_url
-      final avatar = photoProfile ?? photoUrl;
-
-      final providerInfo = {
-        'id': providerId,
+      final userInfo = {
+        'id': userId,
         'name': displayName,
         'prenom': prenom,
         'nom': nom,
@@ -497,13 +731,12 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         'profession': profession,
         'avatar': avatar,
         'isNurse': isNurse,
+        'role': role,
       };
-
-      print('   Provider info: $displayName (${isNurse ? 'Nurse' : 'Doctor'})');
       
-      return providerInfo;
+      return userInfo;
     } catch (e) {
-      print('❌ Error fetching provider info: $e');
+      print('❌ Error fetching user info: $e');
       return null;
     }
   }
@@ -539,7 +772,29 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           ),
         ),
         actions: [
-          if (unreadCount > 0)
+          // Selection mode - show delete button for selected
+          if (_isSelectionMode && _selectedNotifications.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: _deleteSelectedNotifications,
+              tooltip: 'Delete ${_selectedNotifications.length} selected',
+            ),
+          
+          // Selection mode - show cancel button
+          if (_isSelectionMode)
+            TextButton(
+              onPressed: _toggleSelectionMode,
+              child: const Text(
+                'Cancel',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          
+          // Normal mode - show mark all read button
+          if (!_isSelectionMode && unreadCount > 0)
             TextButton(
               onPressed: _markAllAsRead,
               child: Text(
@@ -549,6 +804,44 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   fontWeight: FontWeight.w600,
                 ),
               ),
+            ),
+          
+          // Normal mode - show menu with delete options
+          if (!_isSelectionMode && _notifications.isNotEmpty)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: AppTheme.textPrimaryColor),
+              onSelected: (value) {
+                switch (value) {
+                  case 'select':
+                    _toggleSelectionMode();
+                    break;
+                  case 'delete_all':
+                    _deleteAllNotifications();
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'select',
+                  child: Row(
+                    children: [
+                      Icon(Icons.checklist, color: Colors.blue),
+                      SizedBox(width: 12),
+                      Text('Select Notifications'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'delete_all',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_sweep, color: Colors.red),
+                      SizedBox(width: 12),
+                      Text('Delete All'),
+                    ],
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -672,117 +965,200 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   Widget _buildNotificationCard(Map<String, dynamic> notification, int index) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: notification['isRead']
-            ? null
-            : Border.all(
-                color: notification['color'].withOpacity(0.3),
-                width: 1,
-              ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
+    final notificationId = notification['id'];
+    final isSelected = _selectedNotifications.contains(notificationId);
+    
+    return Dismissible(
+      key: Key(notificationId),
+      direction: _isSelectionMode ? DismissDirection.none : DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: Colors.red,
           borderRadius: BorderRadius.circular(16),
-          onTap: () {
-            HapticFeedback.lightImpact();
-            if (!notification['isRead']) {
-              _markAsRead(notification['id']);
-            }
-            // Handle navigation based on notification type
-            _handleNotificationTap(notification);
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Icon
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: notification['color'].withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.delete, color: Colors.white, size: 28),
+            SizedBox(height: 4),
+            Text(
+              'Delete',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+      confirmDismiss: (direction) async {
+        return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Delete Notification?'),
+            content: const Text('Are you sure you want to delete this notification?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+        );
+      },
+      onDismissed: (direction) {
+        _deleteNotification(notificationId);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryColor.withOpacity(0.1) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          border: isSelected
+              ? Border.all(color: AppTheme.primaryColor, width: 2)
+              : notification['isRead']
+                  ? null
+                  : Border.all(
+                      color: notification['color'].withOpacity(0.3),
+                      width: 1,
+                    ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () {
+              HapticFeedback.lightImpact();
+              
+              if (_isSelectionMode) {
+                // In selection mode, toggle selection
+                _toggleNotificationSelection(notificationId);
+              } else {
+                // Normal mode - mark as read and navigate
+                if (!notification['isRead']) {
+                  _markAsRead(notification['id']);
+                }
+                _handleNotificationTap(notification);
+              }
+            },
+            onLongPress: () {
+              // Long press enters selection mode
+              if (!_isSelectionMode) {
+                HapticFeedback.mediumImpact();
+                setState(() {
+                  _isSelectionMode = true;
+                  _selectedNotifications.add(notificationId);
+                });
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Selection checkbox (only in selection mode)
+                  if (_isSelectionMode) ...[
+                    Checkbox(
+                      value: isSelected,
+                      onChanged: (value) {
+                        _toggleNotificationSelection(notificationId);
+                      },
+                      activeColor: AppTheme.primaryColor,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  
+                  // Icon
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: notification['color'].withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      notification['icon'],
+                      color: notification['color'],
+                      size: 24,
+                    ),
                   ),
-                  child: Icon(
-                    notification['icon'],
-                    color: notification['color'],
-                    size: 24,
-                  ),
-                ),
-                
-                const SizedBox(width: 16),
-                
-                // Content
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              notification['title'],
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: notification['isRead'] 
-                                    ? FontWeight.w600 
-                                    : FontWeight.w700,
-                                color: AppTheme.textPrimaryColor,
+                  
+                  const SizedBox(width: 16),
+                  
+                  // Content
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                notification['title'],
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: notification['isRead'] 
+                                      ? FontWeight.w600 
+                                      : FontWeight.w700,
+                                  color: AppTheme.textPrimaryColor,
+                                ),
                               ),
                             ),
+                            if (!notification['isRead'] && !_isSelectionMode)
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: notification['color'],
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                          ],
+                        ),
+                        
+                        const SizedBox(height: 4),
+                        
+                        Text(
+                          notification['message'],
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textSecondaryColor,
+                            height: 1.4,
                           ),
-                          if (!notification['isRead'])
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: notification['color'],
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                            ),
-                        ],
-                      ),
-                      
-                      const SizedBox(height: 4),
-                      
-                      Text(
-                        notification['message'],
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: AppTheme.textSecondaryColor,
-                          height: 1.4,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      
-                      const SizedBox(height: 8),
-                      
-                      Text(
-                        notification['time'],
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: AppTheme.textSecondaryColor.withOpacity(0.7),
+                        
+                        const SizedBox(height: 8),
+                        
+                        Text(
+                          notification['time'],
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppTheme.textSecondaryColor.withOpacity(0.7),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
