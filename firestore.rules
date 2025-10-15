@@ -144,6 +144,40 @@ service cloud.firestore {
         && resource.data.status in ['pending', 'cancelled'];
     }
 
+    // === /appointment_requests: Scheduled appointment requests (new system) ===
+    match /appointment_requests/{reqId} {
+      // Allow read for authenticated users (patient or provider involved)
+      allow read: if request.auth != null && (
+        resource.data.idpat == request.auth.uid || 
+        resource.data.idpro == request.auth.uid
+      );
+
+      // Patient creates appointment request
+      allow create: if request.auth != null &&
+        request.resource.data.idpat == request.auth.uid &&
+        request.resource.data.keys().hasAll(['idpro', 'service', 'prix', 'status', 'type']) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.type in ['instant', 'scheduled'];
+
+      // Provider can accept/reject requests, patient can cancel
+      allow update: if request.auth != null && (
+        // Patient cancellation (own request, while pending)
+        (resource.data.idpat == request.auth.uid && 
+         resource.data.status == 'pending' && 
+         request.resource.data.status in ['cancelled', 'pending']) ||
+        // Provider acceptance or rejection
+        (resource.data.idpro == request.auth.uid && 
+         resource.data.status == 'pending' && 
+         request.resource.data.status in ['accepted', 'rejected'])
+      );
+
+      // Allow deletion by involved users or Cloud Functions (for cleanup)
+      allow delete: if request.auth != null && (
+        resource.data.idpat == request.auth.uid || 
+        resource.data.idpro == request.auth.uid
+      );
+    }
+
     // === /provider_requests: Pre-appointment provider selection ===
     match /provider_requests/{reqId} {
       // Allow read for authenticated users (patient or provider involved)

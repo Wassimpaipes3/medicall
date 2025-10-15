@@ -10,6 +10,7 @@ import '../../services/provider_location_service.dart';
 import '../../services/provider/provider_service.dart';
 import '../../services/provider_auth_service.dart' as ProviderAuth;
 import '../../services/provider_dashboard_service.dart' as DashboardService;
+import '../../services/appointment_request_service.dart' as RequestService;
 import '../../widgets/provider/provider_navigation_bar.dart';
 import '../../widgets/provider/availability_toggle.dart';
 import '../../routes/app_routes.dart';
@@ -43,7 +44,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
   ProviderUser? _currentProvider;
   ProviderAuth.ProviderProfile? _currentProviderProfile; // New profile from professionals collection
   ProviderStatus _currentStatus = ProviderStatus.offline;
-  List<AppointmentRequest> _pendingRequests = [];
+  List<RequestService.AppointmentRequest> _pendingRequests = [];  // NEW: Use appointment_requests service
   
   int _selectedIndex = 0;
   bool _isLoading = true;
@@ -53,12 +54,18 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
   // Dashboard stats
   DashboardService.DashboardStats? _dashboardStats;
   bool _isLoadingStats = true;
+  
+  // NEW: Upcoming appointments (replaces today's schedule)
+  List<RequestService.UpcomingAppointment> _upcomingAppointments = [];
+  bool _isLoadingAppointments = true;
+  StreamSubscription<List<RequestService.UpcomingAppointment>>? _appointmentsSubscription;
+  StreamSubscription<List<RequestService.AppointmentRequest>>? _requestsSubscription;
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
-    _loadProviderData();
+    _loadProviderData(); // This now starts request and appointments streams
     _startStatusUpdates();
     
     // 🆕 NEW: Initialize location tracking if provider is already online
@@ -147,6 +154,8 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     _pulseController.dispose();
     _staggerController.dispose();
     _statusTimer?.cancel();
+    _requestsSubscription?.cancel(); // ✅ Cancel requests stream
+    _appointmentsSubscription?.cancel(); // ✅ Cancel appointments stream
     
     // 🆕 NEW: Stop location tracking when screen is disposed
     ProviderLocationService.dispose();
@@ -227,10 +236,13 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         }
       }
       
-      final requests = await _providerService.getPendingRequests();
+      // ✅ Load real pending requests from appointment_requests collection
+      final providerId = providerProfile.uid; // Use uid instead of userId
+      final requests = await RequestService.AppointmentRequestService.getProviderPendingRequests(providerId);
       
       print('DEBUG: Legacy provider loaded: $provider');
       print('DEBUG: Provider status: ${provider?.currentStatus}');
+      print('📋 Loaded ${requests.length} REAL pending requests from appointment_requests collection');
       
       if (mounted) {
         setState(() {
@@ -243,6 +255,10 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         
         // Load real dashboard statistics
         await _loadDashboardStats();
+        
+        // Start real-time updates
+        _startRequestsStream(providerId);
+        _startAppointmentsStream(providerId);
         
         print('DEBUG: State updated. Current status: $_currentStatus');
       }
@@ -284,6 +300,50 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         });
       }
     }
+  }
+
+  /// Start listening to real-time pending requests updates
+  void _startRequestsStream(String providerId) {
+    _requestsSubscription = RequestService.AppointmentRequestService
+        .getProviderPendingRequestsStream(providerId)
+        .listen(
+      (requests) {
+        if (mounted) {
+          setState(() {
+            _pendingRequests = requests;
+          });
+          print('📋 Pending requests updated: ${requests.length} requests');
+        }
+      },
+      onError: (error) {
+        print('❌ Error in requests stream: $error');
+      },
+    );
+  }
+
+  /// Start listening to real-time upcoming appointments updates
+  void _startAppointmentsStream(String providerId) {
+    _appointmentsSubscription = RequestService.AppointmentRequestService
+        .getProviderUpcomingAppointmentsStream(providerId)
+        .listen(
+      (appointments) {
+        if (mounted) {
+          setState(() {
+            _upcomingAppointments = appointments;
+            _isLoadingAppointments = false;
+          });
+          print('📅 Upcoming appointments updated: ${appointments.length} appointments');
+        }
+      },
+      onError: (error) {
+        print('❌ Error in appointments stream: $error');
+        if (mounted) {
+          setState(() {
+            _isLoadingAppointments = false;
+          });
+        }
+      },
+    );
   }
 
   void _startStatusUpdates() {
@@ -509,15 +569,17 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
           _buildStatsCards(),
           const SizedBox(height: 24),
           
+          // Active Requests Section (replaces Requests button)
+          _buildActiveRequestsSection(),
+          const SizedBox(height: 24),
+          
+          // Upcoming Appointments Section (shows future scheduled appointments)
+          _buildTodayScheduleSection(),
+          const SizedBox(height: 24),
+          
           // Earnings Trend Chart
           _buildEarningsTrend(),
           const SizedBox(height: 24),
-          
-          _buildActiveRequests(),
-          const SizedBox(height: 24),
-          _buildTodaySchedule(),
-          const SizedBox(height: 24),
-          _buildQuickActions(),
         ],
       ),
     );
@@ -865,72 +927,163 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     );
   }
 
-  Widget _buildActiveRequests() {
-    if (_pendingRequests.isEmpty) {
-      return _buildEmptyState(
-        icon: Icons.inbox_outlined,
-        title: 'No Active Requests',
-        subtitle: 'New appointment requests will appear here',
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text(
-              'Active Requests',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textPrimaryColor,
+  /// Active Requests Section - replaces Requests button with expandable list
+  Widget _buildActiveRequestsSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.inbox_rounded,
+                color: AppTheme.primaryColor,
+                size: 24,
               ),
-            ),
-            const Spacer(),
-            if (_pendingRequests.isNotEmpty)
-              AnimatedBuilder(
-                animation: _pulseAnimation,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _pulseAnimation.value,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${_pendingRequests.length}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+              const SizedBox(width: 12),
+              const Text(
+                'Active Requests',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimaryColor,
+                ),
+              ),
+              const Spacer(),
+              if (_pendingRequests.isNotEmpty)
+                AnimatedBuilder(
+                  animation: _pulseAnimation,
+                  builder: (context, child) {
+                    return Transform.scale(
+                      scale: _pulseAnimation.value,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${_pendingRequests.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        
-        ...(_pendingRequests.take(3).map((request) => _buildRequestCard(request)).toList()),
-        
-        if (_pendingRequests.length > 3)
-          TextButton(
-            onPressed: () {
-              HapticFeedback.lightImpact();
-              _handleNavigationTap(1); // Navigate to appointments/schedule
-            },
-            child: const Text('View All Requests'),
+                    );
+                  },
+                ),
+            ],
           ),
-      ],
+          const SizedBox(height: 16),
+          
+          if (_pendingRequests.isEmpty)
+            _buildEmptyRequestsState()
+          else
+            Column(
+              children: [
+                // Show up to 3 requests
+                ...(_pendingRequests.take(3).map((request) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildRequestCard(request),
+                )).toList()),
+                
+                // View All button
+                if (_pendingRequests.isNotEmpty)
+                  const SizedBox(height: 8),
+                InkWell(
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    Navigator.pushNamed(context, AppRoutes.providerIncomingRequests);
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppTheme.primaryColor.withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _pendingRequests.length > 3
+                              ? 'View All ${_pendingRequests.length} Requests'
+                              : 'View Details',
+                          style: TextStyle(
+                            color: AppTheme.primaryColor,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          color: AppTheme.primaryColor,
+                          size: 18,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 
-  Widget _buildRequestCard(AppointmentRequest request) {
+  Widget _buildEmptyRequestsState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Column(
+        children: [
+          Icon(
+            Icons.inbox_outlined,
+            size: 64,
+            color: Colors.grey.shade300,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Active Requests',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'New instant appointment requests will appear here',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRequestCard(RequestService.AppointmentRequest request) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
@@ -1001,7 +1154,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                       ),
                     ),
                     Text(
-                      request.serviceType,
+                      request.service,
                       style: TextStyle(
                         fontSize: 14,
                         color: Colors.grey.shade600,
@@ -1017,7 +1170,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '\$${request.estimatedFee}',
+                  '${request.totalAmount} MAD',
                   style: const TextStyle(
                     color: Color(0xFFF59E0B),
                     fontSize: 12,
@@ -1031,27 +1184,34 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
           Row(
             children: [
               Icon(
-                Icons.location_on_outlined,
+                Icons.access_time_outlined,
                 color: Colors.grey.shade600,
                 size: 16,
               ),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  request.patientLocationString,
+                  request.appointmentTime,
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '${request.estimatedDuration} min',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  request.status.toUpperCase(),
+                  style: const TextStyle(
+                    color: Color(0xFFF59E0B),
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -1107,122 +1267,249 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     );
   }
 
-  Widget _buildTodaySchedule() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Today\'s Schedule',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: AppTheme.textPrimaryColor,
+  /// Upcoming Appointments Section - shows scheduled appointments for future dates
+  Widget _buildTodayScheduleSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-        ),
-        const SizedBox(height: 16),
-        
-        _buildEmptyState(
-          icon: Icons.calendar_today_outlined,
-          title: 'No Scheduled Appointments',
-          subtitle: 'Your schedule for today is clear',
-        ),
-      ],
-    );
-  }
-
-  Widget _buildQuickActions() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Quick Actions',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: AppTheme.textPrimaryColor,
-          ),
-        ),
-        const SizedBox(height: 16),
-        
-        Row(
-          children: [
-            Expanded(
-              child: _buildActionButton(
-                title: 'Update Schedule',
-                icon: Icons.schedule,
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  _handleNavigationTap(1); // Navigate to schedule/appointments
-                },
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActionButton(
-                title: 'View Earnings',
-                icon: Icons.analytics_outlined,
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  _handleNavigationTap(3); // Navigate to profile (which has earnings)
-                },
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _buildActionButton(
-                title: 'Requests',
-                icon: Icons.inbox_outlined,
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  Navigator.pushNamed(context, AppRoutes.providerIncomingRequests);
-                },
-              ),
-            ),
-          ],
-        ),
-        
-        const SizedBox(height: 12),
-      ],
-    );
-  }
-
-  Widget _buildActionButton({
-    required String title,
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.primaryColor.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.primaryColor.withOpacity(0.2)),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              color: AppTheme.primaryColor,
-              size: 24,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.event_available,
                 color: AppTheme.primaryColor,
+                size: 24,
               ),
-              textAlign: TextAlign.center,
+              const SizedBox(width: 12),
+              const Text(
+                'Upcoming Appointments',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.textPrimaryColor,
+                ),
+              ),
+              const Spacer(),
+              if (_upcomingAppointments.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_upcomingAppointments.length}',
+                    style: TextStyle(
+                      color: AppTheme.primaryColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          if (_isLoadingAppointments)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(32),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_upcomingAppointments.isEmpty)
+            _buildEmptyScheduleState()
+          else
+            Column(
+              children: _upcomingAppointments.map((appointment) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildScheduleCard(appointment),
+                );
+              }).toList(),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
+
+  Widget _buildEmptyScheduleState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 32),
+      child: Column(
+        children: [
+          Icon(
+            Icons.calendar_today_outlined,
+            size: 64,
+            color: Colors.grey.shade300,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Scheduled Appointments',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Your schedule for today is clear',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduleCard(RequestService.UpcomingAppointment appointment) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: appointment.isToday 
+            ? Colors.green.withOpacity(0.05)
+            : appointment.isTomorrow
+                ? Colors.blue.withOpacity(0.05)
+                : AppTheme.primaryColor.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: appointment.isToday 
+              ? Colors.green.withOpacity(0.3)
+              : appointment.isTomorrow
+                  ? Colors.blue.withOpacity(0.3)
+                  : AppTheme.primaryColor.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          // Time indicator
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  appointment.appointmentTime,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          
+          // Appointment details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  appointment.patientName,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimaryColor,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.medical_services_outlined,
+                      size: 14,
+                      color: Colors.grey.shade600,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        appointment.service,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(appointment.status).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    appointment.relativeDate,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: _getStatusColor(appointment.status),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Price
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${appointment.prix.round()} MAD',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF43A047),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'accepted':
+        return const Color(0xFF2196F3);
+      case 'confirmed':
+      case 'confirmé':
+        return AppTheme.primaryColor;
+      case 'completed':
+      case 'terminé':
+        return const Color(0xFF43A047);
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // Quick Actions removed - replaced with Active Requests and Today's Schedule sections
 
   Widget _buildEmptyState({
     required IconData icon,
@@ -1727,19 +2014,31 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
     }
   }
 
+  /// Handle appointment request response (Accept or Reject)
   Future<void> _handleRequestResponse(String requestId, bool accept) async {
     try {
+      // Find the request to get patient name
+      final request = _pendingRequests.firstWhere(
+        (req) => req.id == requestId,
+        orElse: () => _pendingRequests.first,
+      );
+
       if (accept) {
         // Show confirmation dialog for acceptance
         bool? confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text('Accept Request'),
-            content: Text('Are you sure you want to accept this appointment request?'),
+            title: const Text('Accept Request'),
+            content: Text(
+              'Accept appointment request from ${request.patientName}?\n\n'
+              'Date: ${request.formattedDate}\n'
+              'Time: ${request.appointmentTime}\n'
+              'Service: ${request.service}',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: Text('Cancel'),
+                child: const Text('Cancel'),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(context, true),
@@ -1747,43 +2046,82 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                   backgroundColor: const Color(0xFF10B981),
                   foregroundColor: Colors.white,
                 ),
-                child: Text('Accept'),
+                child: const Text('Accept'),
               ),
             ],
           ),
         );
 
-        if (confirmed == true) {
-          // Remove request from pending list
-          setState(() {
-            _pendingRequests.removeWhere((req) => req.id == requestId);
-          });
+        if (confirmed != true) return;
 
+        // Show loading
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => const Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        // Call service to accept request
+        final success = await RequestService.AppointmentRequestService
+            .acceptAppointmentRequest(requestId);
+
+        if (!mounted) return;
+        Navigator.pop(context); // Close loading dialog
+
+        if (success) {
           // Show success message
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Request accepted successfully!'),
-                backgroundColor: const Color(0xFF10B981),
-                duration: Duration(seconds: 3),
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text('✅ Accepted appointment with ${request.patientName}'),
+                  ),
+                ],
               ),
-            );
-          }
+              backgroundColor: const Color(0xFF10B981),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
 
-          // Navigate to appointment management
-          _handleNavigationTap(1);
+          // Reload dashboard stats
+          await _loadDashboardStats();
+
+          // Navigate to appointments tab
+          Future.delayed(const Duration(seconds: 1), () {
+            if (mounted) _handleNavigationTap(1);
+          });
+        } else {
+          // Show error
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Failed to accept appointment request'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
       } else {
         // Show confirmation dialog for decline
         bool? confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text('Decline Request'),
-            content: Text('Are you sure you want to decline this appointment request?'),
+            title: const Text('Decline Request'),
+            content: Text(
+              'Decline appointment request from ${request.patientName}?\n\n'
+              'This action cannot be undone.',
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: Text('Cancel'),
+                child: const Text('Cancel'),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(context, true),
@@ -1791,38 +2129,69 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                   backgroundColor: Colors.red,
                   foregroundColor: Colors.white,
                 ),
-                child: Text('Decline'),
+                child: const Text('Decline'),
               ),
             ],
           ),
         );
 
-        if (confirmed == true) {
-          // Remove request from pending list
-          setState(() {
-            _pendingRequests.removeWhere((req) => req.id == requestId);
-          });
+        if (confirmed != true) return;
 
-          // Show feedback message
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Request declined'),
-                backgroundColor: Colors.orange,
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
+        // Show loading
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => const Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        // Call service to reject request
+        final success = await RequestService.AppointmentRequestService
+            .rejectAppointmentRequest(requestId);
+
+        if (!mounted) return;
+        Navigator.pop(context); // Close loading dialog
+
+        if (success) {
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Declined appointment with ${request.patientName}'),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        } else {
+          // Show error
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Failed to decline appointment request'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
       }
     } catch (e) {
+      print('❌ Error handling request response: $e');
+      
+      // Close loading dialog if open
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
       // Show error message
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('❌ Error: ${e.toString()}'),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
           ),
         );
       }

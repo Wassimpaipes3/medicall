@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
 import '../../core/services/call_service.dart';
 
@@ -92,35 +93,385 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
     super.dispose();
   }
 
-  void _bookAppointment(Map<String, dynamic> staff) {
+  void _bookAppointment(Map<String, dynamic> staff, String doctorId) async {
     HapticFeedback.lightImpact();
     
-    showModalBottomSheet(
+    // Show schedule appointment dialog directly
+    final scheduleData = await _showScheduleAppointmentDialog(staff);
+    
+    if (scheduleData == null) return;
+    
+    // Show loading indicator
+    if (!mounted) return;
+    showDialog(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
+
+      // Get current user data from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('patients')
+          .doc(currentUser.uid)
+          .get();
+      
+      final userData = userDoc.data() ?? {};
+      
+      print('🔍 Patient document exists: ${userDoc.exists}');
+      print('🔍 Patient data keys: ${userData.keys.toList()}');
+      if (userData.containsKey('location')) {
+        print('🔍 Location field type: ${userData['location'].runtimeType}');
+        print('🔍 Location value: ${userData['location']}');
+      }
+      
+      // Get patient location as GeoPoint
+      GeoPoint? patientLocation;
+      if (userData['location'] != null && userData['location'] is GeoPoint) {
+        patientLocation = userData['location'] as GeoPoint;
+        print('✅ Using patient location from user data');
+      } else {
+        patientLocation = const GeoPoint(0.0, 0.0);
+        print('⚠️ No patient location found in patients collection, using default (0,0)');
+        print('   Available fields: ${userData.keys.toList()}');
+      }
+      print('📍 Final patient location: ${patientLocation.latitude}, ${patientLocation.longitude}');
+
+      // Use the doctorId parameter (Firestore document ID)
+      final providerId = doctorId;
+      
+      print('✅ Using Provider ID from Firestore document: $providerId');
+      print('🔍 Staff data keys: ${staff.keys.toList()}');
+      
+      // Get provider location as GeoPoint (from staff data or fetch from professionals)
+      GeoPoint? providerLocation;
+      if (staff['location'] != null && staff['location'] is GeoPoint) {
+        providerLocation = staff['location'] as GeoPoint;
+        print('✅ Using provider location from staff data');
+      } else {
+        try {
+          // Fetch provider location from professionals collection
+          print('🔍 Fetching provider location from Firestore...');
+          final providerDoc = await FirebaseFirestore.instance
+              .collection('professionals')
+              .doc(providerId)
+              .get();
+              
+          if (providerDoc.exists) {
+            final providerData = providerDoc.data();
+            if (providerData != null && providerData['location'] != null) {
+              providerLocation = providerData['location'] as GeoPoint;
+              print('✅ Found provider location in professionals collection');
+            } else {
+              print('⚠️ Provider document exists but no location found');
+            }
+          } else {
+            print('⚠️ Provider document not found in professionals collection');
+          }
+        } catch (e) {
+          print('❌ Error fetching provider location: $e');
+        }
+      }
+      providerLocation ??= const GeoPoint(0.0, 0.0);
+      print('📍 Final provider location: ${providerLocation.latitude}, ${providerLocation.longitude}');
+      
+      // Get service and price
+      final service = staff['specialty'] ?? 'consultation';
+      final prix = (staff['prix'] ?? staff['consultationFee'] ?? 100.0).toDouble();
+
+      print('📅 Creating SCHEDULED appointment for ${scheduleData['date']} at ${scheduleData['time']}');
+      
+      // Create appointment request directly in Firestore with your exact schema
+      final appointmentData = {
+        'idpat': currentUser.uid,
+        'idpro': providerId,
+        'patientlocation': patientLocation,
+        'providerlocation': providerLocation,
+        'patientAddress': userData['adresse'], // Can be null
+        'service': service,
+        'prix': prix.toInt(), // Convert to integer
+        'serviceFee': 0, // Set to 0 as per your schema
+        'paymentMethod': 'Cash',
+        'type': 'scheduled', // 'scheduled' instead of 'instant'
+        'notes': scheduleData['notes'] ?? '',
+        'status': 'pending', // Will be 'accepted' after provider accepts
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      print('📝 Appointment data to create:');
+      print('   idpat: ${appointmentData['idpat']}');
+      print('   idpro: ${appointmentData['idpro']}');
+      print('   service: ${appointmentData['service']}');
+      print('   prix: ${appointmentData['prix']}');
+      print('   type: ${appointmentData['type']}');
+
+      final docRef = await FirebaseFirestore.instance
+          .collection('appointment_requests')
+          .add(appointmentData);
+          
+      print('✅ Document created with ID: ${docRef.id}');
+
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '✅ Appointment request sent!\nWaiting for ${staff['name']} to confirm.',
+                ),
               ),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context); // Close loading dialog
+      
+      print('❌ Error creating scheduled appointment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to create appointment: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
+  /// Show date/time picker dialog for scheduling appointments
+  Future<Map<String, dynamic>?> _showScheduleAppointmentDialog(Map<String, dynamic> staff) async {
+    DateTime? selectedDate;
+    TimeOfDay? selectedTime;
+    String notes = '';
+
+    return await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Schedule Appointment',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'With ${staff['name']}',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppTheme.textSecondaryColor,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Date Selector
+                _buildSectionTitle('Select Date'),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () async {
+                    final date = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now().add(const Duration(days: 1)),
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 90)),
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: ColorScheme.light(
+                              primary: AppTheme.primaryColor,
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (date != null) {
+                      setState(() => selectedDate = date);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_today, color: AppTheme.primaryColor, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            selectedDate == null
+                                ? 'Choose appointment date'
+                                : '${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}',
+                            style: TextStyle(
+                              color: selectedDate == null ? AppTheme.textSecondaryColor : AppTheme.textPrimaryColor,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Time Selector
+                _buildSectionTitle('Select Time'),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () async {
+                    final time = await showTimePicker(
+                      context: context,
+                      initialTime: const TimeOfDay(hour: 9, minute: 0),
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: ColorScheme.light(
+                              primary: AppTheme.primaryColor,
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (time != null) {
+                      setState(() => selectedTime = time);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.access_time, color: AppTheme.primaryColor, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            selectedTime == null
+                                ? 'Choose appointment time'
+                                : selectedTime!.format(context),
+                            style: TextStyle(
+                              color: selectedTime == null ? AppTheme.textSecondaryColor : AppTheme.textPrimaryColor,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Notes Field
+                _buildSectionTitle('Notes (Optional)'),
+                const SizedBox(height: 8),
+                TextField(
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: 'Any special requests or information...',
+                    hintStyle: TextStyle(color: Colors.grey.shade400),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: AppTheme.primaryColor, width: 2),
+                    ),
+                    contentPadding: const EdgeInsets.all(16),
+                  ),
+                  onChanged: (value) => notes = value,
+                ),
+              ],
             ),
-            Expanded(
-              child: _buildStaffDetails(staff),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: selectedDate == null || selectedTime == null
+                  ? null
+                  : () {
+                      // Combine date and time
+                      final appointmentDateTime = DateTime(
+                        selectedDate!.year,
+                        selectedDate!.month,
+                        selectedDate!.day,
+                        selectedTime!.hour,
+                        selectedTime!.minute,
+                      );
+
+                      final timeString = '${selectedTime!.hour.toString().padLeft(2, '0')}:'
+                          '${selectedTime!.minute.toString().padLeft(2, '0')}';
+
+                      Navigator.pop(context, {
+                        'date': appointmentDateTime,
+                        'time': timeString,
+                        'notes': notes.isEmpty ? null : notes,
+                      });
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Confirm Booking'),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: AppTheme.textSecondaryColor,
+        letterSpacing: 0.5,
       ),
     );
   }
@@ -677,7 +1028,7 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () => _bookAppointment(staff),
+                    onPressed: () => _bookAppointment(staff, doctorId),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primaryColor,
                       foregroundColor: Colors.white,

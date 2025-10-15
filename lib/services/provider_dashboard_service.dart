@@ -232,36 +232,66 @@ class ProviderDashboardService {
   }
 
   /// Get pending appointment requests for provider
+  /// Note: Pending requests are stored in 'provider_requests' collection
+  /// Once accepted/confirmed, they move to 'appointments' collection
   static Future<List<AppointmentRequest>> getPendingRequests() async {
     try {
       final user = _auth.currentUser;
       if (user == null) return [];
 
-      // Fetch all appointments and filter manually (handles both idpro and professionnelId)
-      final allAppointments = await _firestore
-          .collection('appointments')
+      print('📋 Fetching pending requests from provider_requests collection...');
+
+      // Fetch from provider_requests collection (where pending requests are stored)
+      final allRequests = await _firestore
+          .collection('provider_requests')
           .get();
       
-      final pendingAppointments = allAppointments.docs.where((doc) {
+      print('   📦 Total requests in collection: ${allRequests.docs.length}');
+      
+      // Filter for this provider's pending requests
+      final pendingRequests = allRequests.docs.where((doc) {
         final data = doc.data();
-        final isMyAppointment = data['idpro'] == user.uid || data['professionnelId'] == user.uid;
+        
+        // Check if it's this provider's request
+        final isMyRequest = data['idpro'] == user.uid || 
+                           data['professionnelId'] == user.uid ||
+                           data['providerId'] == user.uid;
+        
+        if (!isMyRequest) return false;
+        
+        // Check if status is pending
         final etat = data['etat'] as String?;
         final status = data['status'] as String?;
         final isPending = etat == 'en_attente' || etat == 'pending' || 
                          status == 'pending' || status == 'en_attente';
-        return isMyAppointment && isPending;
+        
+        if (isMyRequest && isPending) {
+          print('   ✅ Found pending request: ${doc.id}');
+        }
+        
+        return isPending;
       }).toList();
 
-      // Sort by date and limit to 10
-      pendingAppointments.sort((a, b) {
-        final aDate = (a.data()['dateRendezVous'] as Timestamp?)?.toDate() ?? DateTime.now();
-        final bDate = (b.data()['dateRendezVous'] as Timestamp?)?.toDate() ?? DateTime.now();
-        return aDate.compareTo(bDate);
+      print('   ✅ Found ${pendingRequests.length} pending requests for provider: ${user.uid}');
+
+      // Sort by date (most recent first)
+      pendingRequests.sort((a, b) {
+        final aData = a.data();
+        final bData = b.data();
+        
+        final aDateField = aData['createdAt'] ?? aData['dateRendezVous'] ?? aData['updatedAt'];
+        final bDateField = bData['createdAt'] ?? bData['dateRendezVous'] ?? bData['updatedAt'];
+        
+        final aDate = aDateField != null ? (aDateField as Timestamp).toDate() : DateTime.now();
+        final bDate = bDateField != null ? (bDateField as Timestamp).toDate() : DateTime.now();
+        
+        return bDate.compareTo(aDate); // Most recent first
       });
 
-      final limitedPending = pendingAppointments.take(10).toList();
+      // Limit to 10 most recent
+      final limitedRequests = pendingRequests.take(10).toList();
 
-      return limitedPending.map((doc) {
+      return limitedRequests.map((doc) {
         final data = doc.data();
         return AppointmentRequest.fromFirestore(doc.id, data);
       }).toList();
@@ -322,6 +352,71 @@ class ProviderDashboardService {
     }
   }
 
+  /// Get today's schedule - all confirmed/accepted appointments for today
+  static Future<List<TodayAppointment>> getTodaySchedule() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return [];
+
+      print('📅 Fetching today\'s schedule...');
+
+      // Get today's date range
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final todayEnd = todayStart.add(const Duration(days: 1));
+
+      // Fetch all appointments
+      final allAppointments = await _firestore
+          .collection('appointments')
+          .get();
+
+      // Filter for today's confirmed/accepted appointments
+      final todaySchedule = allAppointments.docs.where((doc) {
+        final data = doc.data();
+        
+        // Check if it's this provider's appointment
+        final isMyAppointment = data['idpro'] == user.uid || data['professionnelId'] == user.uid;
+        if (!isMyAppointment) return false;
+
+        // Check if status is confirmed/accepted
+        final status = data['status'] as String?;
+        final etat = data['etat'] as String?;
+        final isConfirmed = status == 'accepted' || status == 'confirmed' || status == 'completed' ||
+                           etat == 'confirmé' || etat == 'accepté' || etat == 'terminé';
+        if (!isConfirmed) return false;
+
+        // Check if it's today
+        final dateField = data['createdAt'] ?? data['updatedAt'] ?? data['dateRendezVous'];
+        if (dateField == null) return false;
+        
+        final appointmentDate = (dateField as Timestamp).toDate();
+        return appointmentDate.isAfter(todayStart) && appointmentDate.isBefore(todayEnd);
+      }).toList();
+
+      print('   ✅ Found ${todaySchedule.length} appointments for today');
+
+      // Sort by time
+      todaySchedule.sort((a, b) {
+        final aData = a.data();
+        final bData = b.data();
+        final aDate = (aData['createdAt'] ?? aData['updatedAt'] ?? aData['dateRendezVous']) as Timestamp?;
+        final bDate = (bData['createdAt'] ?? bData['updatedAt'] ?? bData['dateRendezVous']) as Timestamp?;
+        if (aDate == null || bDate == null) return 0;
+        return aDate.toDate().compareTo(bDate.toDate());
+      });
+
+      // Convert to TodayAppointment objects
+      return todaySchedule.map((doc) {
+        final data = doc.data();
+        return TodayAppointment.fromFirestore(doc.id, data);
+      }).toList();
+
+    } catch (e) {
+      print('❌ Error fetching today\'s schedule: $e');
+      return [];
+    }
+  }
+
   /// Stream of real-time dashboard updates
   static Stream<DashboardStats> getDashboardStatsStream() {
     final user = _auth.currentUser;
@@ -339,6 +434,19 @@ class ProviderDashboardService {
         .where('professionnelId', isEqualTo: user.uid)
         .snapshots()
         .asyncMap((_) async => await getDashboardStats());
+  }
+
+  /// Stream of today's schedule with real-time updates
+  static Stream<List<TodayAppointment>> getTodayScheduleStream() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      return Stream.value([]);
+    }
+
+    return _firestore
+        .collection('appointments')
+        .snapshots()
+        .asyncMap((_) async => await getTodaySchedule());
   }
 }
 
@@ -385,17 +493,131 @@ class AppointmentRequest {
   });
 
   factory AppointmentRequest.fromFirestore(String id, Map<String, dynamic> data) {
+    // Get patient name from multiple possible fields
+    final patientNom = data['patientNom'] ?? data['nom'] ?? '';
+    final patientPrenom = data['patientPrenom'] ?? data['prenom'] ?? '';
+    final patientId = data['patientId'] ?? data['idpat'] ?? '';
+    
+    // Get date from multiple possible fields
+    final dateField = data['dateRendezVous'] ?? data['createdAt'] ?? data['updatedAt'];
+    final dateRendezVous = dateField != null 
+        ? (dateField as Timestamp).toDate() 
+        : DateTime.now();
+    
+    // Get service/motif from multiple fields
+    final motifConsultation = data['motifConsultation'] ?? data['service'] ?? data['motif'] ?? 'Consultation générale';
+    
+    // Get price from multiple fields
+    final tarif = (data['tarif'] as num?)?.toDouble() ?? 
+                 (data['prix'] as num?)?.toDouble() ?? 
+                 (data['price'] as num?)?.toDouble() ?? 
+                 100.0;
+    
+    // Get status from multiple fields
+    final etat = data['etat'] ?? data['status'] ?? 'pending';
+    
     return AppointmentRequest(
       id: id,
-      patientId: data['patientId'] ?? '',
-      patientNom: data['patientNom'] ?? 'Patient',
-      patientPrenom: data['patientPrenom'] ?? '',
-      dateRendezVous: (data['dateRendezVous'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      motifConsultation: data['motifConsultation'] ?? 'Consultation générale',
-      tarif: (data['tarif'] as num?)?.toDouble() ?? 100.0,
-      etat: data['etat'] ?? 'pending',
+      patientId: patientId,
+      patientNom: patientNom,
+      patientPrenom: patientPrenom,
+      dateRendezVous: dateRendezVous,
+      motifConsultation: motifConsultation,
+      tarif: tarif,
+      etat: etat,
     );
   }
 
-  String get patientFullName => '$patientPrenom $patientNom'.trim();
+  String get patientFullName => '$patientPrenom $patientNom'.trim().isNotEmpty 
+      ? '$patientPrenom $patientNom'.trim() 
+      : 'Patient';
+  
+  // Convenience getters for dashboard UI
+  String get patientName => patientFullName;
+  String get serviceType => motifConsultation;
+  double get estimatedFee => tarif;
+}
+
+/// Today's appointment model for schedule display
+class TodayAppointment {
+  final String id;
+  final String patientId;
+  final String patientName;
+  final DateTime appointmentTime;
+  final String service;
+  final String status;
+  final double price;
+  final String? patientPhone;
+
+  const TodayAppointment({
+    required this.id,
+    required this.patientId,
+    required this.patientName,
+    required this.appointmentTime,
+    required this.service,
+    required this.status,
+    required this.price,
+    this.patientPhone,
+  });
+
+  factory TodayAppointment.fromFirestore(String id, Map<String, dynamic> data) {
+    // Get patient name from various possible fields
+    final patientNom = data['patientNom'] ?? '';
+    final patientPrenom = data['patientPrenom'] ?? '';
+    final patientName = patientPrenom.isNotEmpty || patientNom.isNotEmpty
+        ? '$patientPrenom $patientNom'.trim()
+        : 'Patient';
+
+    // Get appointment time
+    final dateField = data['createdAt'] ?? data['updatedAt'] ?? data['dateRendezVous'];
+    final appointmentTime = dateField != null
+        ? (dateField as Timestamp).toDate()
+        : DateTime.now();
+
+    // Get service type
+    final service = data['service'] as String? ?? 
+                   data['motifConsultation'] as String? ?? 
+                   'Consultation';
+
+    // Get status
+    final status = data['status'] as String? ?? data['etat'] as String? ?? 'unknown';
+
+    // Get price
+    final price = (data['prix'] as num?)?.toDouble() ?? 
+                 (data['tarif'] as num?)?.toDouble() ?? 
+                 (data['price'] as num?)?.toDouble() ?? 
+                 100.0;
+
+    return TodayAppointment(
+      id: id,
+      patientId: data['idpat'] ?? data['patientId'] ?? '',
+      patientName: patientName,
+      appointmentTime: appointmentTime,
+      service: service,
+      status: status,
+      price: price,
+      patientPhone: data['patientPhone'] ?? data['patientTelephone'],
+    );
+  }
+
+  String get timeString {
+    final hour = appointmentTime.hour.toString().padLeft(2, '0');
+    final minute = appointmentTime.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  String get statusDisplay {
+    switch (status.toLowerCase()) {
+      case 'accepted':
+        return 'Accepted';
+      case 'confirmed':
+      case 'confirmé':
+        return 'Confirmed';
+      case 'completed':
+      case 'terminé':
+        return 'Completed';
+      default:
+        return status;
+    }
+  }
 }

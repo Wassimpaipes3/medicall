@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/provider_request_service.dart';
+import '../../services/appointment_request_service.dart' as AppointmentRequest;
 import '../../routes/app_routes.dart';
 
 /// Polished Material 3 Select Provider Screen
@@ -417,17 +419,79 @@ class _PolishedSelectProviderScreenState extends State<PolishedSelectProviderScr
   }
 
   Future<void> _selectProvider(ProviderData provider) async {
+    // Show dialog to choose booking type: Instant or Schedule
+    final bookingType = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Choose Booking Type',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Book appointment with ${provider.name}',
+              style: TextStyle(color: _textSecondary),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${provider.specialty}${provider.services != null ? ' - ${provider.services}' : ''}',
+              style: TextStyle(
+                fontSize: 13,
+                color: _textSecondary,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.pop(context, 'instant'),
+            icon: const Icon(Icons.flash_on),
+            label: const Text('Instant'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _primaryColor,
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(context, 'schedule'),
+            icon: const Icon(Icons.calendar_month),
+            label: const Text('Schedule'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryColor,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (bookingType == null) return;
+
+    if (bookingType == 'instant') {
+      await _createInstantRequest(provider);
+    } else {
+      await _createScheduledRequest(provider);
+    }
+  }
+
+  /// Create instant appointment request (old flow)
+  Future<void> _createInstantRequest(ProviderData provider) async {
     setState(() => _creatingRequestFor = provider.id);
 
     try {
-      // Use the provider's actual prix from professionals collection
-      print('💰 Creating request with provider prix: ${provider.price} DZD');
+      print('⚡ Creating INSTANT request with provider prix: ${provider.price} DZD');
       
       final requestId = await ProviderRequestService.createRequest(
         patientLocation: widget.patientLocation,
         service: widget.service,
         specialty: widget.specialty,
-        prix: provider.price, // Use provider's prix instead of widget.prix
+        prix: provider.price,
         paymentMethod: widget.paymentMethod,
         providerId: provider.id,
       );
@@ -445,13 +509,324 @@ class _PolishedSelectProviderScreenState extends State<PolishedSelectProviderScr
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to create request: $e'),
+          content: Text('Failed to create instant request: $e'),
           backgroundColor: _errorColor,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     }
+  }
+
+  /// Create scheduled appointment request (new flow)
+  Future<void> _createScheduledRequest(ProviderData provider) async {
+    // Show date/time picker dialog
+    final scheduleData = await _showScheduleDateTimePicker(provider);
+    
+    if (scheduleData == null) return;
+
+    setState(() => _creatingRequestFor = provider.id);
+
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
+
+      // Get current user data from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('patients')
+          .doc(currentUser.uid)
+          .get();
+      
+      final userData = userDoc.data() ?? {};
+      final patientName = userData['nom'] ?? 'Unknown';
+      final patientPhone = userData['tel'] ?? '';
+
+      print('📅 Creating SCHEDULED request for ${scheduleData['date']} at ${scheduleData['time']}');
+      
+      final requestId = await AppointmentRequest.AppointmentRequestService.createAppointmentRequest(
+        providerId: provider.id,
+        patientId: currentUser.uid,
+        patientName: patientName,
+        patientPhone: patientPhone,
+        service: widget.service,
+        prix: provider.price,
+        serviceFee: 20.0, // TODO: Make this configurable
+        paymentMethod: widget.paymentMethod,
+        type: 'scheduled',
+        appointmentDate: scheduleData['date'],
+        appointmentTime: scheduleData['time'],
+        patientLocation: {
+          'latitude': widget.patientLocation.latitude,
+          'longitude': widget.patientLocation.longitude,
+        },
+        patientAddress: userData['adresse'],
+        notes: scheduleData['notes'],
+      );
+
+      if (!mounted) return;
+      setState(() => _creatingRequestFor = null);
+
+      if (requestId != null) {
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '✅ Appointment request sent!\nWaiting for ${provider.name} to confirm.',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: _successColor,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+
+        // Navigate back or to appointments screen
+        Navigator.of(context).pop(); // Go back to previous screen
+      } else {
+        throw Exception('Failed to create appointment request');
+      }
+    } catch (e) {
+      setState(() => _creatingRequestFor = null);
+      if (!mounted) return;
+
+      print('❌ Error creating scheduled request: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to create scheduled appointment: $e'),
+          backgroundColor: _errorColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
+  /// Show date/time picker dialog for scheduling
+  Future<Map<String, dynamic>?> _showScheduleDateTimePicker(ProviderData provider) async {
+    DateTime? selectedDate;
+    TimeOfDay? selectedTime;
+    String notes = '';
+
+    return await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Schedule Appointment',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'With ${provider.name}',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _textSecondary,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Date Selector
+                _buildSectionTitle('Select Date'),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () async {
+                    final date = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now().add(const Duration(days: 1)),
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 90)),
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: const ColorScheme.light(
+                              primary: _primaryColor,
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (date != null) {
+                      setState(() => selectedDate = date);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_today, color: _primaryColor, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            selectedDate == null
+                                ? 'Choose appointment date'
+                                : '${selectedDate!.day}/${selectedDate!.month}/${selectedDate!.year}',
+                            style: TextStyle(
+                              color: selectedDate == null ? _textSecondary : _textPrimary,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Time Selector
+                _buildSectionTitle('Select Time'),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () async {
+                    final time = await showTimePicker(
+                      context: context,
+                      initialTime: const TimeOfDay(hour: 9, minute: 0),
+                      builder: (context, child) {
+                        return Theme(
+                          data: Theme.of(context).copyWith(
+                            colorScheme: const ColorScheme.light(
+                              primary: _primaryColor,
+                            ),
+                          ),
+                          child: child!,
+                        );
+                      },
+                    );
+                    if (time != null) {
+                      setState(() => selectedTime = time);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.access_time, color: _primaryColor, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            selectedTime == null
+                                ? 'Choose appointment time'
+                                : selectedTime!.format(context),
+                            style: TextStyle(
+                              color: selectedTime == null ? _textSecondary : _textPrimary,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Notes Field
+                _buildSectionTitle('Notes (Optional)'),
+                const SizedBox(height: 8),
+                TextField(
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: 'Any special requests or information...',
+                    hintStyle: TextStyle(color: Colors.grey.shade400),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _primaryColor, width: 2),
+                    ),
+                    contentPadding: const EdgeInsets.all(16),
+                  ),
+                  onChanged: (value) => notes = value,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: selectedDate == null || selectedTime == null
+                  ? null
+                  : () {
+                      // Combine date and time
+                      final appointmentDateTime = DateTime(
+                        selectedDate!.year,
+                        selectedDate!.month,
+                        selectedDate!.day,
+                        selectedTime!.hour,
+                        selectedTime!.minute,
+                      );
+
+                      final timeString = '${selectedTime!.hour.toString().padLeft(2, '0')}:'
+                          '${selectedTime!.minute.toString().padLeft(2, '0')}';
+
+                      Navigator.pop(context, {
+                        'date': appointmentDateTime,
+                        'time': timeString,
+                        'notes': notes.isEmpty ? null : notes,
+                      });
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Confirm Booking'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: _textSecondary,
+        letterSpacing: 0.5,
+      ),
+    );
   }
 
   void _showProviderDetails(ProviderData provider) {
