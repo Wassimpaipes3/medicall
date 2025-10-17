@@ -25,7 +25,7 @@ import 'package:firstv/screens/provider/provider_login_screen.dart';
 import 'package:firstv/screens/provider/provider_navigation_screen.dart';
 import 'package:firstv/screens/provider/provider_messages_screen.dart';
 import 'package:firstv/screens/provider/provider_earnings_screen.dart';
-import 'package:firstv/screens/provider/appointment_management_screen.dart';
+import 'package:firstv/screens/provider/provider_schedule_screen.dart';
 import 'package:firstv/screens/provider/enhanced_profile_screen.dart' as ProviderEnhanced;
 import 'package:firstv/screens/provider/enhanced_messages_screen.dart';
 import 'package:firstv/screens/provider/enhanced_earnings_screen.dart';
@@ -211,7 +211,7 @@ class MyApp extends StatelessWidget {
           child: const ProviderEarningsScreen(),
         ),
         AppRoutes.providerAppointments: (context) => RouteGuard.providerRouteGuard(
-          child: const AppointmentManagementScreen(),
+          child: const ProviderScheduleScreen(),
         ),
         AppRoutes.providerRequests: (context) => RouteGuard.providerRouteGuard(
           child: const ProviderRequestsScreen(),

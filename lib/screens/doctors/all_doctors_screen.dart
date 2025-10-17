@@ -188,10 +188,15 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
 
       print('📅 Creating SCHEDULED appointment for ${scheduleData['date']} at ${scheduleData['time']}');
       
+      // Use the complete date/time from the dialog (already contains both date and time)
+      final scheduledDateTime = scheduleData['date'] as DateTime;
+      
       // Create appointment request directly in Firestore with your exact schema
       final appointmentData = {
         'idpat': currentUser.uid,
         'idpro': providerId,
+        'patientName': userData['nom'] ?? userData['name'] ?? 'Unknown Patient', // Add patient name
+        'patientPhone': userData['telephone'] ?? userData['phone'] ?? '', // Add patient phone
         'patientlocation': patientLocation,
         'providerlocation': providerLocation,
         'patientAddress': userData['adresse'], // Can be null
@@ -200,8 +205,10 @@ class _AllDoctorsScreenState extends State<AllDoctorsScreen>
         'serviceFee': 0, // Set to 0 as per your schema
         'paymentMethod': 'Cash',
         'type': 'scheduled', // 'scheduled' instead of 'instant'
+        'appointmentTime': scheduleData['time'], // Time is already formatted as string
         'notes': scheduleData['notes'] ?? '',
         'status': 'pending', // Will be 'accepted' after provider accepts
+        'scheduledDate': Timestamp.fromDate(scheduledDateTime), // Added scheduledDate field
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };

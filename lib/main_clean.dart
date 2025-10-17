@@ -4,6 +4,7 @@ import 'core/theme.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/chat/chat_screen.dart';
 import 'screens/profile/profile_screen.dart' as profile;
+import 'screens/provider/provider_schedule_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,50 +71,12 @@ class _CleanMainNavigationState extends State<CleanMainNavigation> {
       case 1:
         return const ChatScreen();
       case 2:
-        return _buildScheduleScreen(); // Temporary until we create schedule screen
+        return const ProviderScheduleScreen();
       case 3:
         return const profile.ProfileScreen();
       default:
         return const HomeScreen();
     }
-  }
-
-  // Temporary schedule screen until we create the real one
-  Widget _buildScheduleScreen() {
-    return Container(
-      color: Colors.orange.withOpacity(0.1),
-      child: const SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.calendar_month,
-                size: 100,
-                color: Colors.orange,
-              ),
-              SizedBox(height: 20),
-              Text(
-                'Schedule',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.orange,
-                ),
-              ),
-              SizedBox(height: 10),
-              Text(
-                'Schedule screen coming soon!',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _buildBottomNavBar() {

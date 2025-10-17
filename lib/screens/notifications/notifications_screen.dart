@@ -22,7 +22,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   List<Map<String, dynamic>> _notifications = [];
   bool _isLoading = true;
   bool _isSelectionMode = false;
-  Set<String> _selectedNotifications = {};
+  final Set<String> _selectedNotifications = {};
 
   @override
   void initState() {

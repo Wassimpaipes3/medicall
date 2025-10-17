@@ -1,0 +1,1242 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:async';
+import '../../core/theme.dart';
+import '../../services/appointment_request_service.dart' as RequestService;
+import '../../services/provider_auth_service.dart' as ProviderAuth;
+
+class ProviderScheduleScreen extends StatefulWidget {
+  const ProviderScheduleScreen({super.key});
+
+  @override
+  State<ProviderScheduleScreen> createState() => _ProviderScheduleScreenState();
+}
+
+class _ProviderScheduleScreenState extends State<ProviderScheduleScreen> with TickerProviderStateMixin {
+  // Tab controller for Pending/Accepted/Completed tabs
+  late TabController _tabController;
+  
+  // Appointment lists for each tab
+  List<RequestService.AppointmentRequest> _pendingAppointments = [];
+  List<RequestService.AppointmentRequest> _acceptedAppointments = [];
+  List<RequestService.AppointmentRequest> _completedAppointments = [];
+  
+  bool _isLoading = true;
+  Timer? _alertTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    print('🚀 SCHEDULE SCREEN INITIALIZED - You are now on the Schedule screen with tabs');
+    
+    // Initialize tab controller with 3 tabs
+    _tabController = TabController(length: 3, vsync: this);
+    
+    _loadAllAppointments();
+    _setupAppointmentAlerts();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _alertTimer?.cancel();
+    super.dispose();
+  }
+
+  // Set up periodic checks for upcoming appointments
+  void _setupAppointmentAlerts() {
+    Timer.periodic(const Duration(minutes: 1), (timer) {
+      _checkUpcomingAppointments();
+    });
+  }
+
+  // Check for appointments that are starting soon and show alerts
+  void _checkUpcomingAppointments() {
+    final now = DateTime.now();
+    
+    // Check all accepted appointments for upcoming alerts
+    for (final appointment in _acceptedAppointments) {
+      final appointmentDateTime = appointment.appointmentDate;
+      final timeDifference = appointmentDateTime.difference(now);
+      
+      // Alert 15 minutes before appointment
+      if (timeDifference.inMinutes == 15) {
+        _showAppointmentAlert(appointment, '15 minutes');
+      }
+      // Alert 5 minutes before appointment
+      else if (timeDifference.inMinutes == 5) {
+        _showAppointmentAlert(appointment, '5 minutes');
+        }
+        // Alert when appointment time arrives
+        else if (timeDifference.inMinutes == 0) {
+          _showAppointmentAlert(appointment, 'now');
+        }
+      }
+    }
+  }
+
+  // Show appointment alert dialog
+  void _showAppointmentAlert(RequestService.AppointmentRequest appointment, String timing) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.schedule, color: AppTheme.primaryColor),
+            const SizedBox(width: 8),
+            const Text('Appointment Alert'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              timing == 'now' 
+                ? 'Your appointment is starting now!'
+                : 'Your appointment starts in $timing',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Text('Patient: ${appointment.patientName}'),
+            Text('Service: ${appointment.service}'),
+            Text('Time: ${appointment.appointmentTime}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              // Navigate to appointment details or call patient
+            },
+            child: const Text('View Details'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _loadAllAppointments() async {
+    try {
+      setState(() => _isLoading = true);
+      
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) {
+        print('❌ No authenticated user found');
+        return;
+      }
+
+      // Get provider profile
+      final providerProfile = await ProviderAuth.ProviderAuthService.getCurrentProviderProfile();
+      if (providerProfile == null) {
+        print('❌ No provider profile found');
+        return;
+      }
+
+      print('📅 DEBUG: Loading scheduled appointments for provider: ${providerProfile.uid}');
+
+      // Load appointments from both collections and separate by status
+      
+      // 1. Get pending scheduled from appointment_requests
+      final pendingScheduled = await RequestService.AppointmentRequestService.getProviderScheduledAppointments(providerProfile.uid);
+      
+      // 2. Get accepted/completed from appointments collection
+      final acceptedAppointments = await _getAcceptedAppointments(providerProfile.uid);
+      
+      // Separate into different lists based on status
+      List<RequestService.AppointmentRequest> pending = [];
+      List<RequestService.AppointmentRequest> accepted = [];
+      List<RequestService.AppointmentRequest> completed = [];
+      
+      // Add pending appointments
+      for (var apt in pendingScheduled) {
+        if (apt.status == 'pending') {
+          pending.add(apt);
+        } else if (apt.status == 'accepted') {
+          accepted.add(apt);
+        } else if (apt.status == 'completed') {
+          completed.add(apt);
+        }
+      }
+      
+      // Add accepted/completed appointments
+      for (var apt in acceptedAppointments) {
+        if (apt.status == 'accepted') {
+          accepted.add(apt);
+        } else if (apt.status == 'completed') {
+          completed.add(apt);
+        }
+      }
+      
+      setState(() {
+        _pendingAppointments = pending;
+        _acceptedAppointments = accepted;
+        _completedAppointments = completed;
+        _isLoading = false;
+      });
+
+      print('📅 Loaded appointments by status:');
+      print('  ⏳ Pending: ${pending.length}');
+      print('  ✅ Accepted: ${accepted.length}');
+      print('  ✅ Completed: ${completed.length}');
+      
+      print('  📋 Pending from appointment_requests: ${pendingScheduled.length}');
+      print('  ✅ Accepted from appointments: ${acceptedAppointments.length}');
+      
+      // Print details for all appointments
+      int index = 0;
+      for (var apt in [...pending, ...accepted, ...completed]) {
+        print('  📅 Appointment ${index++}: Patient: "${apt.patientName}" (ID: ${apt.patientId}) - ${apt.service} - Type: ${apt.type} - Status: ${apt.status}');
+        print('       Date: ${apt.appointmentDate}, Time: ${apt.appointmentTime}');
+      }
+
+    } catch (e) {
+      print('❌ Error loading scheduled appointments: $e');
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // Fetch accepted/completed appointments from appointments collection
+  Future<List<RequestService.AppointmentRequest>> _getAcceptedAppointments(String providerId) async {
+    try {
+      print('📅 Fetching accepted appointments from appointments collection for provider: $providerId');
+      
+      // Query appointments collection without orderBy to avoid index issues
+      final snapshot = await FirebaseFirestore.instance
+          .collection('appointments')
+          .where('idpro', isEqualTo: providerId)
+          .where('type', isEqualTo: 'scheduled')
+          .get();
+      
+      print('   ✅ Found ${snapshot.docs.length} appointments in appointments collection');
+      
+      List<RequestService.AppointmentRequest> appointments = [];
+      
+      for (var doc in snapshot.docs) {
+        try {
+          // Convert appointments collection document to AppointmentRequest
+          final data = doc.data();
+          
+          // Map the fields from appointments collection to AppointmentRequest format
+          final appointmentRequest = RequestService.AppointmentRequest(
+            id: doc.id,
+            patientId: data['idpat'] ?? '',
+            patientName: data['patientName'] ?? 'Unknown Patient',
+            patientPhone: data['patientPhone'] ?? '',
+            providerId: data['idpro'] ?? '',
+            service: data['service'] ?? 'Consultation',
+            prix: (data['prix'] as num?)?.toDouble() ?? 0.0,
+            serviceFee: (data['serviceFee'] as num?)?.toDouble() ?? 0.0,
+            paymentMethod: data['paymentMethod'] ?? 'Cash',
+            type: data['type'] ?? 'scheduled',
+            appointmentDate: (data['appointmentDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+            appointmentTime: data['appointmentTime'] ?? '09:00',
+            patientLocation: data['patientLocation'] as Map<String, dynamic>?,
+            providerLocation: data['providerLocation'] as Map<String, dynamic>?,
+            patientAddress: data['patientAddress'],
+            notes: data['notes'],
+            status: data['status'] ?? 'accepted', // Default to accepted since it's in appointments collection
+            createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          );
+          
+          appointments.add(appointmentRequest);
+          print('  📅 Added appointment: ${appointmentRequest.patientName} - ${appointmentRequest.status}');
+          
+        } catch (e) {
+          print('❌ Error parsing appointment document ${doc.id}: $e');
+        }
+      }
+      
+      return appointments;
+      
+    } catch (e) {
+      print('❌ Error fetching accepted appointments: $e');
+      return [];
+    }
+  }
+
+  // Fetch user profile data from Firestore
+  Future<Map<String, String?>> _getUserProfile(String userId) async {
+    try {
+      print('🔍 Fetching profile for user: $userId');
+      
+      // Try patients collection first
+      final patientDoc = await FirebaseFirestore.instance
+          .collection('patients')
+          .doc(userId)
+          .get();
+      
+      if (patientDoc.exists) {
+        final data = patientDoc.data()!;
+        print('📋 Patient document fields: ${data.keys.toList()}');
+        print('✅ Found patient profile: nom="${data['nom']}" prenom="${data['prenom']}"');
+        
+        // Try different field name combinations
+        String firstName = data['nom'] ?? data['name'] ?? data['firstName'] ?? '';
+        String lastName = data['prenom'] ?? data['lastName'] ?? data['surname'] ?? '';
+        String fullName = (firstName + ' ' + lastName).trim();
+        
+        if (fullName.isEmpty) {
+          fullName = data['displayName'] ?? data['fullName'] ?? 'Patient';
+        }
+        
+        return {
+          'name': fullName,
+          'photo': data['photo'] as String? ?? data['photo_profile'] as String?,
+        };
+      }
+      
+      // Try users collection as fallback
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      if (userDoc.exists) {
+        final data = userDoc.data()!;
+        print('📋 User document fields: ${data.keys.toList()}');
+        print('✅ Found user profile: nom="${data['nom']}" prenom="${data['prenom']}"');
+        
+        // Try different field name combinations
+        String firstName = data['nom'] ?? data['name'] ?? data['firstName'] ?? '';
+        String lastName = data['prenom'] ?? data['lastName'] ?? data['surname'] ?? '';
+        String fullName = (firstName + ' ' + lastName).trim();
+        
+        if (fullName.isEmpty) {
+          fullName = data['displayName'] ?? data['fullName'] ?? 'User';
+        }
+        
+        return {
+          'name': fullName,
+          'photo': data['photo_profile'] as String? ?? data['photo'] as String?,
+        };
+      }
+      
+      print('❌ No profile found for user: $userId');
+      return {'name': null, 'photo': null};
+      
+    } catch (e) {
+      print('❌ Error fetching user profile: $e');
+      return {'name': null, 'photo': null};
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey.shade50,
+      appBar: AppBar(
+        title: const Text(
+          'Appointments',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: AppTheme.textPrimaryColor,
+          ),
+        ),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: _loadAllAppointments,
+            icon: const Icon(Icons.refresh, color: AppTheme.primaryColor),
+          ),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: AppTheme.primaryColor,
+          unselectedLabelColor: Colors.grey.shade600,
+          indicatorColor: AppTheme.primaryColor,
+          indicatorWeight: 3,
+          labelStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+          tabs: [
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.pending, size: 14),
+                  const SizedBox(width: 2),
+                  Flexible(
+                    child: Text(
+                      'Pending (${_pendingAppointments.length})',
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle, size: 14),
+                  const SizedBox(width: 2),
+                  Flexible(
+                    child: Text(
+                      'Accepted (${_acceptedAppointments.length})',
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.task_alt, size: 14),
+                  const SizedBox(width: 2),
+                  Flexible(
+                    child: Text(
+                      'Completed (${_completedAppointments.length})',
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
+              ),
+            )
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                // Pending Tab
+                _buildAppointmentList(_pendingAppointments, 'pending'),
+                // Accepted Tab  
+                _buildAppointmentList(_acceptedAppointments, 'accepted'),
+                // Completed Tab
+                _buildAppointmentList(_completedAppointments, 'completed'),
+              ],
+            ),
+    );
+  }
+
+  // Build appointment list for each tab
+  Widget _buildAppointmentList(List<RequestService.AppointmentRequest> appointments, String status) {
+    if (appointments.isEmpty) {
+      return _buildEmptyState(status);
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAllAppointments,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: appointments.length,
+        itemBuilder: (context, index) {
+          final appointment = appointments[index];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _buildAppointmentCard(appointment, status),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String status) {
+    String title, subtitle, emoji;
+    switch (status) {
+      case 'pending':
+        title = 'No Pending Appointments';
+        subtitle = 'New appointment requests will appear here';
+        emoji = '⏳';
+        break;
+      case 'accepted':
+        title = 'No Accepted Appointments';
+        subtitle = 'Appointments you\'ve accepted will appear here';
+        emoji = '✅';
+        break;
+      case 'completed':
+        title = 'No Completed Appointments';
+        subtitle = 'Your completed appointments will appear here';
+        emoji = '🎯';
+        break;
+      default:
+        title = 'No Appointments';
+        subtitle = 'Your appointments will appear here';
+        emoji = '📅';
+    }
+
+    return Container(
+      margin: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(40),
+            ),
+            child: Center(
+              child: Text(
+                emoji,
+                style: const TextStyle(fontSize: 40),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textPrimaryColor,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey.shade600,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(25),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: AppTheme.primaryColor,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Patients can book appointments with you',
+                  style: TextStyle(
+                    color: AppTheme.primaryColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPatientAvatar(String patientId, Color statusColor) {
+    return FutureBuilder<Map<String, String?>>(
+      future: _getUserProfile(patientId),
+      builder: (context, snapshot) {
+        String? photoUrl;
+        if (snapshot.hasData) {
+          photoUrl = snapshot.data!['photo'];
+        }
+        
+        return Container(
+          width: 50,
+          height: 50,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(25),
+            boxShadow: [
+              BoxShadow(
+                color: statusColor.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(25),
+            child: photoUrl != null && photoUrl.isNotEmpty
+                ? Image.network(
+                    photoUrl,
+                    width: 50,
+                    height: 50,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return _buildDefaultAvatar(statusColor);
+                    },
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return _buildDefaultAvatar(statusColor);
+                    },
+                  )
+                : _buildDefaultAvatar(statusColor),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDefaultAvatar(Color statusColor) {
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            statusColor,
+            statusColor.withOpacity(0.8),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(25),
+      ),
+      child: const Icon(
+        Icons.person,
+        color: Colors.white,
+        size: 24,
+      ),
+    );
+  }
+
+  Widget _buildAppointmentCard(RequestService.AppointmentRequest appointment, String tabStatus) {
+    // Parse appointment date and time
+    DateTime appointmentDateTime;
+    String dateText = 'Date not set';
+    String timeText = 'Time not set';
+    String relativeDateText = '';
+    
+    try {
+      // appointmentDate is already a DateTime object
+      appointmentDateTime = appointment.appointmentDate;
+      timeText = appointment.appointmentTime;
+      
+      // Format the date as DD/MM/YYYY
+      dateText = '${appointmentDateTime.day.toString().padLeft(2, '0')}/${appointmentDateTime.month.toString().padLeft(2, '0')}/${appointmentDateTime.year}';
+      
+      // Calculate relative date
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final appointmentDay = DateTime(appointmentDateTime.year, appointmentDateTime.month, appointmentDateTime.day);
+      final difference = appointmentDay.difference(today).inDays;
+      
+      if (difference == 0) {
+        relativeDateText = 'Today';
+      } else if (difference == 1) {
+        relativeDateText = 'Tomorrow';
+      } else if (difference > 1) {
+        relativeDateText = 'In $difference days';
+      } else if (difference == -1) {
+        relativeDateText = 'Yesterday';
+      } else {
+        relativeDateText = '${-difference} days ago';
+      }
+      
+    } catch (e) {
+      print('Error parsing appointment date/time: $e');
+      // Fallback values
+      appointmentDateTime = appointment.appointmentDate;
+      dateText = appointment.appointmentDate.toString().split(' ')[0];
+      timeText = appointment.appointmentTime;
+      relativeDateText = 'Unknown';
+    }
+
+    // Determine status color
+    Color statusColor = const Color(0xFF059669); // Default green for accepted
+    String statusText = 'Accepted';
+    IconData statusIcon = Icons.check_circle;
+
+    if (appointment.status == 'pending') {
+      statusColor = const Color(0xFFF59E0B); // Orange for pending
+      statusText = 'Pending';
+      statusIcon = Icons.pending;
+    } else if (appointment.status == 'accepted') {
+      statusColor = const Color(0xFF059669); // Green for accepted
+      statusText = 'Accepted';
+      statusIcon = Icons.check_circle;
+    } else if (appointment.status == 'completed') {
+      statusColor = const Color(0xFF6B7280); // Gray for completed
+      statusText = 'Completed';
+      statusIcon = Icons.task_alt;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: statusColor.withOpacity(0.2),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header with patient info and status
+          Row(
+            children: [
+              _buildPatientAvatar(appointment.patientId, statusColor),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FutureBuilder<Map<String, String?>>(
+                            future: _getUserProfile(appointment.patientId),
+                            builder: (context, snapshot) {
+                              String patientName = appointment.patientName;
+                              if (snapshot.hasData && snapshot.data!['name'] != null) {
+                                patientName = snapshot.data!['name']!;
+                              }
+                              
+                              return Text(
+                                patientName,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.textPrimaryColor,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              );
+                            },
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: statusColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                statusIcon,
+                                color: statusColor,
+                                size: 14,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                statusText,
+                                style: TextStyle(
+                                  color: statusColor,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      appointment.service,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Date and Time Information
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: statusColor.withOpacity(0.1),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.calendar_today,
+                        color: statusColor,
+                        size: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            dateText,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.textPrimaryColor,
+                            ),
+                          ),
+                          if (relativeDateText.isNotEmpty)
+                            Text(
+                              relativeDateText,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: statusColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.access_time,
+                        color: statusColor,
+                        size: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      timeText,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.textPrimaryColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Patient Contact and Price
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.phone,
+                        color: Colors.grey.shade600,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          appointment.patientPhone.isNotEmpty ? appointment.patientPhone : 'No phone',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF059669).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.attach_money,
+                      color: Color(0xFF059669),
+                      size: 16,
+                    ),
+                    Text(
+                      '${appointment.totalAmount} MAD',
+                      style: const TextStyle(
+                        color: Color(0xFF059669),
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          
+          // Notes if available
+          if (appointment.notes != null && appointment.notes!.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: Colors.blue.shade200,
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.note_alt_outlined,
+                        color: Colors.blue.shade600,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Patient Notes:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    appointment.notes!,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.blue.shade800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          
+          const SizedBox(height: 16),
+          
+          // Action Buttons based on status
+          _buildActionButtons(appointment, statusColor),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons(RequestService.AppointmentRequest appointment, Color statusColor) {
+    switch (appointment.status) {
+      case 'pending':
+        return Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  _rejectAppointment(appointment.id);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: const BorderSide(color: Colors.red),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.close, size: 18),
+                label: const Text(
+                  'Reject',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  _acceptAppointment(appointment.id);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF059669),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.check, size: 18),
+                label: const Text(
+                  'Accept',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        );
+
+      case 'accepted':
+        return Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  // TODO: Open chat with patient
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryColor,
+                  side: BorderSide(color: AppTheme.primaryColor),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.chat_outlined, size: 18),
+                label: const Text(
+                  'Chat',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  _completeAppointment(appointment.id);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: statusColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.task_alt, size: 18),
+                label: const Text(
+                  'Complete',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        );
+
+      case 'completed':
+        return Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  // TODO: Open chat with patient
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryColor,
+                  side: BorderSide(color: AppTheme.primaryColor),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.chat_outlined, size: 18),
+                label: const Text(
+                  'Chat',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  HapticFeedback.lightImpact();
+                  // TODO: Call patient or view details
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: statusColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.phone_outlined, size: 18),
+                label: const Text(
+                  'Call',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        );
+
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Future<void> _acceptAppointment(String appointmentId) async {
+    try {
+      print('✅ Accepting appointment: $appointmentId');
+      
+      // Use the service method that moves to appointments collection
+      final success = await RequestService.AppointmentRequestService.acceptAppointmentRequest(appointmentId);
+      
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Appointment accepted successfully!'),
+            backgroundColor: Color(0xFF059669),
+          ),
+        );
+        
+        // Reload appointments
+        _loadAllAppointments();
+      } else {
+        throw Exception('Failed to accept appointment');
+      }
+      
+    } catch (e) {
+      print('❌ Error accepting appointment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to accept appointment. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _completeAppointment(String appointmentId) async {
+    try {
+      print('✅ Completing appointment: $appointmentId');
+      
+      // Update status in appointments collection (where accepted appointments are stored)
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(appointmentId)
+          .update({
+        'status': 'completed',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Appointment completed successfully!'),
+          backgroundColor: Color(0xFF6B7280),
+        ),
+      );
+      
+      // Reload appointments
+      _loadAllAppointments();
+      
+    } catch (e) {
+      print('❌ Error completing appointment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to complete appointment. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _rejectAppointment(String appointmentId) async {
+    try {
+      print('❌ Rejecting appointment: $appointmentId');
+      
+      // Delete the appointment request
+      await FirebaseFirestore.instance
+          .collection('appointment_requests')
+          .doc(appointmentId)
+          .delete();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Appointment rejected and removed.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      
+      // Reload appointments
+      _loadAllAppointments();
+      
+    } catch (e) {
+      print('❌ Error rejecting appointment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to reject appointment. Please try again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}

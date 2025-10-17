@@ -14,7 +14,7 @@ import '../../services/appointment_request_service.dart' as RequestService;
 import '../../widgets/provider/provider_navigation_bar.dart';
 import '../../widgets/provider/availability_toggle.dart';
 import '../../routes/app_routes.dart';
-import '../../utils/responsive_button_layout.dart';
+
 import 'earnings_analytics_screen.dart';
 import 'appointments_analytics_screen.dart';
 import 'ratings_analytics_screen.dart';
@@ -236,13 +236,21 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         }
       }
       
-      // ✅ Load real pending requests from appointment_requests collection
+      // ✅ Load real INSTANT requests only from appointment_requests collection  
       final providerId = providerProfile.uid; // Use uid instead of userId
-      final requests = await RequestService.AppointmentRequestService.getProviderPendingRequests(providerId);
+      final requests = await RequestService.AppointmentRequestService.getProviderInstantRequests(providerId);
       
       print('DEBUG: Legacy provider loaded: $provider');
       print('DEBUG: Provider status: ${provider?.currentStatus}');
-      print('📋 Loaded ${requests.length} REAL pending requests from appointment_requests collection');
+      print('📋 Loaded ${requests.length} INSTANT requests from appointment_requests collection');
+      print('🔍 Provider ID used for query: $providerId');
+      print('🔍 Provider name: ${providerProfile.fullName}');
+      
+      // Debug: Print each request for debugging
+      for (int i = 0; i < requests.length; i++) {
+        final request = requests[i];
+        print('   Request $i: ${request.patientName} - ${request.service} - ${request.status}');
+      }
       
       if (mounted) {
         setState(() {
@@ -305,18 +313,22 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
   /// Start listening to real-time pending requests updates
   void _startRequestsStream(String providerId) {
     _requestsSubscription = RequestService.AppointmentRequestService
-        .getProviderPendingRequestsStream(providerId)
+        .getProviderInstantRequestsStream(providerId)
         .listen(
       (requests) {
         if (mounted) {
           setState(() {
             _pendingRequests = requests;
           });
-          print('📋 Pending requests updated: ${requests.length} requests');
+          print('📋 STREAM UPDATE: INSTANT requests updated: ${requests.length} requests');
+          for (int i = 0; i < requests.length; i++) {
+            final request = requests[i];
+            print('   Stream Request $i: ${request.patientName} - ${request.service} - Type: ${request.type}');
+          }
         }
       },
       onError: (error) {
-        print('❌ Error in requests stream: $error');
+        print('❌ Error in instant requests stream: $error');
       },
     );
   }
@@ -576,10 +588,6 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
           // Upcoming Appointments Section (shows future scheduled appointments)
           _buildTodayScheduleSection(),
           const SizedBox(height: 24),
-          
-          // Earnings Trend Chart
-          _buildEarningsTrend(),
-          const SizedBox(height: 24),
         ],
       ),
     );
@@ -659,6 +667,35 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         ],
       ],
     );
+  }
+
+  // Fetch user profile data from users collection
+  Future<Map<String, String?>> _getUserProfile(String userId) async {
+    try {
+      print('🔍 Dashboard: Fetching profile for user: $userId');
+      
+      // Query users collection for patient data  
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      if (userDoc.exists) {
+        final data = userDoc.data()!;
+        print('✅ Dashboard: Found user profile: ${data['nom']} ${data['prenom']}');
+        return {
+          'name': '${data['nom'] ?? ''} ${data['prenom'] ?? ''}'.trim(),
+          'photo': data['photo_profile'] as String?,
+        };
+      }
+      
+      print('❌ Dashboard: No profile found for user: $userId');
+      return {'name': null, 'photo': null};
+      
+    } catch (e) {
+      print('❌ Dashboard: Error fetching user profile: $e');
+      return {'name': null, 'photo': null};
+    }
   }
 
   /// Build earnings trend chart widget
@@ -902,12 +939,16 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: color,
+                Expanded(
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
                   ),
                 ),
               ],
@@ -995,11 +1036,25 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
           else
             Column(
               children: [
+                // Debug info
+                Container(
+                  padding: EdgeInsets.all(8),
+                  color: Colors.blue.shade50,
+                  child: Text(
+                    'DEBUG: Found ${_pendingRequests.length} pending requests',
+                    style: TextStyle(color: Colors.blue, fontSize: 12),
+                  ),
+                ),
+                SizedBox(height: 8),
+                
                 // Show up to 3 requests
-                ...(_pendingRequests.take(3).map((request) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildRequestCard(request),
-                )).toList()),
+                ...(_pendingRequests.take(3).map((request) {
+                  print('🎨 Rendering request card for: ${request.patientName}');
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _buildRequestCard(request),
+                  );
+                }).toList()),
                 
                 // View All button
                 if (_pendingRequests.isNotEmpty)
@@ -1084,31 +1139,33 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
   }
 
   Widget _buildRequestCard(RequestService.AppointmentRequest request) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.white,
-            AppTheme.primaryColor.withOpacity(0.02),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.primaryColor.withOpacity(0.2)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
+    print('🎨 Building request card for: ${request.patientName}');
+    try {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Colors.white,
+              AppTheme.primaryColor.withOpacity(0.02),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-        ],
-      ),
-      child: Column(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.primaryColor.withOpacity(0.2)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -1152,6 +1209,8 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimaryColor,
                       ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                     Text(
                       request.service,
@@ -1159,6 +1218,8 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                         fontSize: 14,
                         color: Colors.grey.shade600,
                       ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                   ],
                 ),
@@ -1197,6 +1258,8 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
                     color: Colors.grey.shade600,
                     fontWeight: FontWeight.w500,
                   ),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               ),
               Container(
@@ -1218,53 +1281,62 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
           ),
           const SizedBox(height: 16),
           
-          // Action Buttons - Using responsive layout
-          ResponsiveButtonLayout.adaptiveButtonRow(
-            buttons: [
-              OutlinedButton(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  _handleRequestResponse(request.id, false);
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red,
-                  side: BorderSide(color: Colors.red),
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Decline',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+          // View Details Button - Navigate to request page
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                Navigator.pushNamed(context, AppRoutes.providerIncomingRequests);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              ElevatedButton(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  _handleRequestResponse(request.id, true);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Accept',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: const Text(
+                'View Details',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600, 
+                  fontSize: 15,
                 ),
               ),
-            ],
-            spacing: 12.0,
-            minButtonWidth: 100.0,
+            ),
           ),
         ],
       ),
     );
+    } catch (e) {
+      print('❌ Error building request card: $e');
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.red.shade200),
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.error, color: Colors.red, size: 32),
+            SizedBox(height: 8),
+            Text(
+              'Error displaying appointment',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+            ),
+            Text(
+              'Patient: ${request.patientName}',
+              style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   /// Upcoming Appointments Section - shows scheduled appointments for future dates
@@ -1426,13 +1498,23 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  appointment.patientName,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimaryColor,
-                  ),
+                FutureBuilder<Map<String, String?>>(
+                  future: _getUserProfile(appointment.patientId),
+                  builder: (context, snapshot) {
+                    String patientName = appointment.patientName;
+                    if (snapshot.hasData && snapshot.data!['name'] != null) {
+                      patientName = snapshot.data!['name']!;
+                    }
+                    
+                    return Text(
+                      patientName,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimaryColor,
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 4),
                 Row(

@@ -122,6 +122,85 @@ class AppointmentRequestService {
     });
   }
 
+  /// Get only instant (immediate) pending requests for a provider
+  static Future<List<AppointmentRequest>> getProviderInstantRequests(String providerId) async {
+    try {
+      print('📋 Fetching instant requests for provider: $providerId');
+
+      final snapshot = await _firestore
+          .collection('appointment_requests')
+          .where('idpro', isEqualTo: providerId)
+          .where('status', isEqualTo: 'pending')
+          .where('type', isEqualTo: 'instant')
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      print('   ✅ Found ${snapshot.docs.length} instant requests');
+
+      return snapshot.docs.map((doc) {
+        return AppointmentRequest.fromFirestore(doc.id, doc.data());
+      }).toList();
+
+    } catch (e) {
+      print('❌ Error fetching instant requests: $e');
+      return [];
+    }
+  }
+
+  /// Get all scheduled appointments for a provider (pending, accepted, completed)
+  static Future<List<AppointmentRequest>> getProviderScheduledAppointments(String providerId) async {
+    try {
+      print('📅 Fetching scheduled appointments for provider: $providerId');
+
+      final snapshot = await _firestore
+          .collection('appointment_requests')
+          .where('idpro', isEqualTo: providerId)
+          .where('type', isEqualTo: 'scheduled')
+          .get();
+
+      print('   ✅ Found ${snapshot.docs.length} scheduled appointments');
+
+      return snapshot.docs.map((doc) {
+        return AppointmentRequest.fromFirestore(doc.id, doc.data());
+      }).toList();
+
+    } catch (e) {
+      print('❌ Error fetching scheduled appointments: $e');
+      return [];
+    }
+  }
+
+  /// Stream for instant requests only
+  static Stream<List<AppointmentRequest>> getProviderInstantRequestsStream(String providerId) {
+    return _firestore
+        .collection('appointment_requests')
+        .where('idpro', isEqualTo: providerId)
+        .where('status', isEqualTo: 'pending')
+        .where('type', isEqualTo: 'instant')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        return AppointmentRequest.fromFirestore(doc.id, doc.data());
+      }).toList();
+    });
+  }
+
+  /// Stream for all scheduled appointments (pending, accepted, completed)
+  static Stream<List<AppointmentRequest>> getProviderScheduledAppointmentsStream(String providerId) {
+    return _firestore
+        .collection('appointment_requests')
+        .where('idpro', isEqualTo: providerId)
+        .where('type', isEqualTo: 'scheduled')
+        .orderBy('appointmentDate', descending: false)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        return AppointmentRequest.fromFirestore(doc.id, doc.data());
+      }).toList();
+    });
+  }
+
   /// Accept an appointment request
   /// Copies data from 'appointment_requests' to 'appointments' collection
   static Future<bool> acceptAppointmentRequest(String requestId) async {
@@ -141,21 +220,41 @@ class AppointmentRequestService {
 
       final requestData = requestDoc.data()!;
 
+      // Fetch real patient name from users collection
+      String patientName = requestData['patientName'] ?? 'Unknown Patient';
+      String patientPhone = requestData['patientPhone'] ?? '';
+      
+      try {
+        final patientId = requestData['idpat'];
+        if (patientId != null) {
+          final userDoc = await _firestore.collection('users').doc(patientId).get();
+          if (userDoc.exists) {
+            final userData = userDoc.data()!;
+            patientName = '${userData['nom'] ?? ''} ${userData['prenom'] ?? ''}'.trim();
+            if (patientName.isEmpty) patientName = userData['email'] ?? 'Unknown Patient';
+            patientPhone = userData['tel'] ?? patientPhone;
+            print('✅ Retrieved patient name: $patientName');
+          }
+        }
+      } catch (e) {
+        print('❌ Error fetching patient data: $e');
+      }
+
       // Prepare appointment data for main collection
       final appointmentData = {
         'idpat': requestData['idpat'],
         'idpro': requestData['idpro'],
-        'patientName': requestData['patientName'],
-        'patientPhone': requestData['patientPhone'],
+        'patientName': patientName,
+        'patientPhone': patientPhone,
         'service': requestData['service'],
         'prix': requestData['prix'],
         'serviceFee': requestData['serviceFee'],
         'paymentMethod': requestData['paymentMethod'],
         'type': requestData['type'],
-        'appointmentDate': requestData['appointmentDate'],
+        'appointmentDate': requestData['scheduledDate'], // Map scheduledDate to appointmentDate
         'appointmentTime': requestData['appointmentTime'],
-        'patientLocation': requestData['patientLocation'],
-        'providerLocation': requestData['providerLocation'],
+        'patientLocation': requestData['patientlocation'], // Map patientlocation to patientLocation
+        'providerLocation': requestData['providerlocation'], // Map providerlocation to providerLocation
         'patientAddress': requestData['patientAddress'],
         'notes': requestData['notes'],
         
@@ -381,7 +480,7 @@ class AppointmentRequest {
       serviceFee: (data['serviceFee'] as num?)?.toDouble() ?? 0.0,
       paymentMethod: data['paymentMethod'] ?? 'cash',
       type: data['type'] ?? 'scheduled',
-      appointmentDate: (data['appointmentDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      appointmentDate: (data['scheduledDate'] as Timestamp?)?.toDate() ?? (data['appointmentDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
       appointmentTime: data['appointmentTime'] ?? '09:00',
       patientLocation: data['patientLocation'] as Map<String, dynamic>?,
       providerLocation: data['providerLocation'] as Map<String, dynamic>?,

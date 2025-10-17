@@ -8,6 +8,8 @@ import '../../routes/app_routes.dart';
 import '../../services/provider/provider_service.dart';
 import '../../widgets/provider/provider_navigation_bar.dart';
 import '../../services/provider_request_service.dart';
+import '../../services/appointment_request_service.dart' as AppointmentRequestService;
+import '../../services/provider_auth_service.dart' as ProviderAuth;
 
 class AppointmentManagementScreen extends StatefulWidget {
   const AppointmentManagementScreen({super.key});
@@ -25,9 +27,10 @@ class _AppointmentManagementScreenState extends State<AppointmentManagementScree
   late Animation<Offset> _slideAnimation;
   late Animation<double> _pulseAnimation;
 
-  List<AppointmentRequest> _pendingRequests = [];
-  List<AppointmentRequest> _activeAppointments = [];
-  List<AppointmentRequest> _completedAppointments = [];
+  // Real scheduled appointments from Firestore 
+  List<AppointmentRequestService.AppointmentRequest> _pendingRequests = [];
+  List<AppointmentRequestService.UpcomingAppointment> _activeAppointments = [];
+  List<AppointmentRequestService.UpcomingAppointment> _completedAppointments = [];
   
   int _selectedTabIndex = 0;
   bool _isLoading = true;
@@ -83,9 +86,34 @@ class _AppointmentManagementScreenState extends State<AppointmentManagementScree
 
   Future<void> _loadAppointments() async {
     try {
-      final pendingRequests = await _providerService.getPendingRequests();
-      final activeAppointments = await _providerService.getActiveAppointments();
-      final completedAppointments = await _providerService.getCompletedAppointments();
+      // Get current provider ID from auth service
+      final currentProvider = await ProviderAuth.ProviderAuthService.getCurrentProviderProfile();
+      if (currentProvider == null) {
+        throw Exception('Provider not logged in');
+      }
+      
+      final providerId = currentProvider.uid;
+      print('📋 Loading real appointments for provider: $providerId');
+
+      // Load pending appointment requests (from appointment_requests collection)
+      final pendingRequests = await AppointmentRequestService.AppointmentRequestService.getProviderPendingRequests(providerId);
+      print('   Pending requests: ${pendingRequests.length}');
+
+      // Load active and completed appointments (from appointments collection)
+      final allAppointments = await AppointmentRequestService.AppointmentRequestService.getProviderUpcomingAppointments(providerId);
+      print('   All appointments: ${allAppointments.length}');
+      
+      // Separate appointments by status
+      final activeAppointments = allAppointments.where((apt) => 
+        apt.status == 'accepted' || apt.status == 'confirmed' || apt.status == 'active'
+      ).toList();
+      
+      final completedAppointments = allAppointments.where((apt) => 
+        apt.status == 'completed' || apt.status == 'finished'
+      ).toList();
+
+      print('   Active appointments: ${activeAppointments.length}');
+      print('   Completed appointments: ${completedAppointments.length}');
 
       if (mounted) {
         setState(() {
@@ -96,6 +124,7 @@ class _AppointmentManagementScreenState extends State<AppointmentManagementScree
         });
       }
     } catch (e) {
+      print('❌ Error loading appointments: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -313,42 +342,58 @@ class _AppointmentManagementScreenState extends State<AppointmentManagementScree
   }
 
   Widget _buildTabContent() {
-    List<AppointmentRequest> currentList;
-    Widget Function(AppointmentRequest) cardBuilder;
-
     switch (_selectedTabIndex) {
       case 0:
-        currentList = _pendingRequests;
-        cardBuilder = _buildPendingRequestCard;
-        break;
+        // Pending requests (from appointment_requests collection)
+        if (_pendingRequests.isEmpty) {
+          return _buildEmptyState();
+        }
+        return RefreshIndicator(
+          onRefresh: _loadAppointments,
+          color: AppTheme.primaryColor,
+          child: ListView.builder(
+            padding: const EdgeInsets.all(20),
+            itemCount: _pendingRequests.length,
+            itemBuilder: (context, index) {
+              return _buildNewPendingRequestCard(_pendingRequests[index]);
+            },
+          ),
+        );
       case 1:
-        currentList = _activeAppointments;
-        cardBuilder = _buildActiveAppointmentCard;
-        break;
+        // Active appointments (from appointments collection)
+        if (_activeAppointments.isEmpty) {
+          return _buildEmptyState();
+        }
+        return RefreshIndicator(
+          onRefresh: _loadAppointments,
+          color: AppTheme.primaryColor,
+          child: ListView.builder(
+            padding: const EdgeInsets.all(20),
+            itemCount: _activeAppointments.length,
+            itemBuilder: (context, index) {
+              return _buildNewActiveAppointmentCard(_activeAppointments[index]);
+            },
+          ),
+        );
       case 2:
-        currentList = _completedAppointments;
-        cardBuilder = _buildCompletedAppointmentCard;
-        break;
+        // Completed appointments (from appointments collection)
+        if (_completedAppointments.isEmpty) {
+          return _buildEmptyState();
+        }
+        return RefreshIndicator(
+          onRefresh: _loadAppointments,
+          color: AppTheme.primaryColor,
+          child: ListView.builder(
+            padding: const EdgeInsets.all(20),
+            itemCount: _completedAppointments.length,
+            itemBuilder: (context, index) {
+              return _buildNewCompletedAppointmentCard(_completedAppointments[index]);
+            },
+          ),
+        );
       default:
-        currentList = [];
-        cardBuilder = _buildPendingRequestCard;
+        return _buildEmptyState();
     }
-
-    if (currentList.isEmpty) {
-      return _buildEmptyState();
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadAppointments,
-      color: AppTheme.primaryColor,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(20),
-        itemCount: currentList.length,
-        itemBuilder: (context, index) {
-          return cardBuilder(currentList[index]);
-        },
-      ),
-    );
   }
 
   Widget _buildPendingRequestCard(AppointmentRequest request) {
@@ -812,6 +857,526 @@ class _AppointmentManagementScreenState extends State<AppointmentManagementScree
     );
   }
 
+  // NEW: Real data card builders with blue/white theme and patient information
+
+  Widget _buildNewPendingRequestCard(AppointmentRequestService.AppointmentRequest request) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.blue.shade200, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.shade50,
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with patient info
+            Row(
+              children: [
+                // Patient avatar (circular icon)
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.person,
+                    color: Colors.blue.shade700,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Patient details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        request.patientName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (request.patientPhone.isNotEmpty)
+                        Text(
+                          request.patientPhone,
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 14,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // Status badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Pending',
+                    style: TextStyle(
+                      color: Colors.orange.shade700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // Appointment details
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildInfoRow(Icons.medical_services, 'Service', request.service),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.schedule, 'Date', request.formattedDate),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.access_time, 'Time', request.appointmentTime),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.payments, 'Amount', '${request.prix} MAD'),
+                ],
+              ),
+            ),
+            
+            if (request.notes != null && request.notes!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Notes',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade700,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      request.notes!,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            
+            const SizedBox(height: 16),
+            
+            // Action buttons
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => _rejectRequest(request.id),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.red.shade300),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      'Decline',
+                      style: TextStyle(color: Colors.red.shade600),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => _acceptRequest(request.id),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade600,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text('Accept'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNewActiveAppointmentCard(AppointmentRequestService.UpcomingAppointment appointment) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.blue.shade200, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.blue.shade50,
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with patient info
+            Row(
+              children: [
+                // Patient avatar
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade100,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.person,
+                    color: Colors.blue.shade700,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Patient details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        appointment.patientName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (appointment.patientPhone.isNotEmpty)
+                        Text(
+                          appointment.patientPhone,
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 14,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // Status badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Active',
+                    style: TextStyle(
+                      color: Colors.green.shade700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // Appointment details
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildInfoRow(Icons.medical_services, 'Service', appointment.service),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.schedule, 'Date', _formatDate(appointment.appointmentDate)),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.access_time, 'Time', appointment.appointmentTime),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.payments, 'Amount', '${appointment.prix} MAD'),
+                ],
+              ),
+            ),
+            
+            if (appointment.notes != null && appointment.notes!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Notes',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade700,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      appointment.notes!,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            
+            const SizedBox(height: 16),
+            
+            // Action buttons for active appointments
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _callPatient(appointment.patientPhone),
+                    icon: const Icon(Icons.phone),
+                    label: const Text('Call Patient'),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.blue.shade300),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _markAsComplete(appointment.id),
+                    icon: const Icon(Icons.check_circle),
+                    label: const Text('Complete'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade600,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNewCompletedAppointmentCard(AppointmentRequestService.UpcomingAppointment appointment) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade300, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade100,
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with patient info
+            Row(
+              children: [
+                // Patient avatar (greyed out for completed)
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.person,
+                    color: Colors.grey.shade600,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // Patient details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        appointment.patientName,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (appointment.patientPhone.isNotEmpty)
+                        Text(
+                          appointment.patientPhone,
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 14,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                // Status badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Completed',
+                    style: TextStyle(
+                      color: Colors.grey.shade700,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // Appointment details
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  _buildInfoRow(Icons.medical_services, 'Service', appointment.service),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.schedule, 'Date', _formatDate(appointment.appointmentDate)),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.access_time, 'Time', appointment.appointmentTime),
+                  const SizedBox(height: 8),
+                  _buildInfoRow(Icons.payments, 'Amount', '${appointment.prix} MAD'),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Completed appointment actions
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _viewAppointmentDetails(appointment.id),
+                    icon: const Icon(Icons.visibility),
+                    label: const Text('View Details'),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.grey.shade400),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.blue.shade600),
+        const SizedBox(width: 8),
+        Text(
+          '$label:',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Colors.grey.shade700,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+  }
+
   Widget _buildEmptyState() {
     String title, subtitle;
     IconData icon;
@@ -1230,6 +1795,201 @@ class _AppointmentManagementScreenState extends State<AppointmentManagementScree
         'patientId': appointment['patientId'],
         'patientName': appointment['patientName'],
       },
+    );
+  }
+
+  // NEW: Action methods for real appointment management
+
+  Future<void> _acceptRequest(String requestId) async {
+    try {
+      print('✅ Accepting appointment request: $requestId');
+      
+      // Show loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Accepting request...'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      // Accept the request using the appointment request service
+      final success = await AppointmentRequestService.AppointmentRequestService.acceptAppointmentRequest(requestId);
+      
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Appointment request accepted!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        
+        // Refresh data and switch to active tab
+        await _loadAppointments();
+        setState(() {
+          _selectedTabIndex = 1; // Switch to Active tab
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ Failed to accept request'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error accepting request: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _rejectRequest(String requestId) async {
+    try {
+      print('❌ Rejecting appointment request: $requestId');
+      
+      // Show confirmation dialog
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Decline Request'),
+          content: const Text('Are you sure you want to decline this appointment request?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Decline'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed == true) {
+        // Reject the request
+        final success = await AppointmentRequestService.AppointmentRequestService.rejectAppointmentRequest(requestId);
+        
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Request declined'),
+              backgroundColor: Colors.grey,
+            ),
+          );
+          
+          // Refresh data
+          await _loadAppointments();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ Failed to decline request'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ Error rejecting request: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _callPatient(String phoneNumber) {
+    if (phoneNumber.isNotEmpty) {
+      // This would integrate with a calling service
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Calling $phoneNumber...'),
+          backgroundColor: Colors.blue,
+        ),
+      );
+      // TODO: Integrate with actual calling functionality
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No phone number available'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+  }
+
+  Future<void> _markAsComplete(String appointmentId) async {
+    try {
+      print('✅ Marking appointment as complete: $appointmentId');
+      
+      // Show confirmation dialog
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Complete Appointment'),
+          content: const Text('Mark this appointment as completed?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('Complete'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed == true) {
+        // TODO: Update appointment status to completed in Firestore
+        // For now, just show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Appointment marked as completed!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        
+        // Refresh data and switch to completed tab
+        await _loadAppointments();
+        setState(() {
+          _selectedTabIndex = 2; // Switch to Completed tab
+        });
+      }
+    } catch (e) {
+      print('❌ Error completing appointment: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _viewAppointmentDetails(String appointmentId) {
+    // Show appointment details dialog or navigate to details screen
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Appointment Details'),
+        content: Text('Appointment ID: $appointmentId\n\nDetailed information about the completed appointment would be displayed here.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
   }
 }
